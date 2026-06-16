@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import android.graphics.Bitmap
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -123,6 +124,7 @@ class NearbyConnectionManager(private val context: Context) {
     private val SERVICE_ID = "com.nicolas.teleo.NEARBY_SERVICE"
     
     var myName = Build.MODEL
+    var myId = UUID.randomUUID().toString()
     var connectedEndpointId = mutableStateOf<String?>(null)
     var isAdvertising = mutableStateOf(false)
     var isDiscovering = mutableStateOf(false)
@@ -226,11 +228,11 @@ class NearbyConnectionManager(private val context: Context) {
 
     fun sendMessage(msg: TeleoNearbyMessage) {
         connectedEndpointId.value?.let { id ->
-            val msgWithName = msg.copy(senderName = myName)
-            val payload = Payload.fromBytes(msgWithName.toJSON().toByteArray())
+            val msgWithIdentity = msg.copy(senderId = myId, senderName = myName)
+            val payload = Payload.fromBytes(msgWithIdentity.toJSON().toByteArray())
             connectionsClient.sendPayload(id, payload)
-            if (msgWithName.type == "text" || msgWithName.type == "final") {
-                messages.add(msgWithName)
+            if (msgWithIdentity.type == "text" || msgWithIdentity.type == "final") {
+                messages.add(msgWithIdentity)
             }
         }
     }
@@ -287,6 +289,28 @@ object TeleoEmojiMapper {
     }
 }
 
+object TeleoChatStyle {
+    private val palette = listOf(
+        CyberCyan,
+        CyberTeal,
+        CyberMagenta,
+        CyberYellow,
+        Color(0xFF4FC3F7),
+        Color(0xFF81C784),
+        Color(0xFFFF8A65),
+        Color(0xFFBA68C8)
+    )
+
+    fun colorForParticipant(seed: String): Color {
+        if (seed.isBlank()) return CyberCyan
+        return palette[(seed.hashCode() and Int.MAX_VALUE) % palette.size]
+    }
+
+    fun contentColorFor(background: Color): Color {
+        return if (background.luminance() > 0.5f) Color.Black else Color.White
+    }
+}
+
 // --- ACTIVIDAD PRINCIPAL ---
 
 class MainActivity : ComponentActivity() {
@@ -306,6 +330,7 @@ class MainActivity : ComponentActivity() {
     private val useEmojis = mutableStateOf(true)
     private val useEmotions = mutableStateOf(true)
     private val userName = mutableStateOf("")
+    private val userId = mutableStateOf("")
 
     private val RECORD_AUDIO_REQUEST = 1001
     private val handler = Handler(Looper.getMainLooper())
@@ -317,9 +342,13 @@ class MainActivity : ComponentActivity() {
 
         val prefs = getSharedPreferences("teleo_prefs", Context.MODE_PRIVATE)
         userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL
+        userId.value = prefs.getString("user_id", null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString("user_id", it).apply()
+        }
 
         nearbyManager = NearbyConnectionManager(this)
         nearbyManager.myName = userName.value
+        nearbyManager.myId = userId.value
         initSpeechRecognizer()
 
         hasRecordPermission.value = checkNearbyPermissions()
@@ -611,10 +640,10 @@ fun ProfileScreen(currentName: String, onSave: (String) -> Unit, onBack: () -> U
             Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(80.dp), tint = CyberCyan)
         }
         Spacer(modifier = Modifier.height(32.dp))
-        Text("TU APODO EN TELEO", color = Color.Gray, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text("TU NICKNAME EN TELEO", color = Color.Gray, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
-            value = nameInput, onValueChange = { nameInput = it }, modifier = Modifier.width(400.dp), placeholder = { Text("Escribí tu nombre...", color = Color.Gray) }, singleLine = true,
+            value = nameInput, onValueChange = { nameInput = it }, modifier = Modifier.width(400.dp), placeholder = { Text("Escribí tu nickname...", color = Color.Gray) }, singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan, unfocusedBorderColor = Color.Gray),
             textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
         )
@@ -849,6 +878,30 @@ fun NearbyChatScreen(manager: NearbyConnectionManager, isListening: MutableState
     val listState = rememberLazyListState()
     LaunchedEffect(manager.messages.size) { if (manager.messages.isNotEmpty()) listState.animateScrollToItem(manager.messages.size - 1) }
     Column(modifier = Modifier.fillMaxSize().background(CyberDark)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) {
+                Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White)
+            }
+            Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.25f))) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Box(modifier = Modifier.size(8.dp).background(if (isListening.value) CyberTeal else Color.Red.copy(alpha = 0.4f), CircleShape))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = if (isListening.value) "ONLINE" else "OFFLINE", color = if (isListening.value) CyberTeal else Color.Red.copy(alpha = 0.4f), fontSize = 10.sp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    IconButton(onClick = { if (isListening.value) onPauseVoice() else onStartVoice() }, modifier = Modifier.size(36.dp).background(if (isListening.value) CyberMagenta.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f), CircleShape)) {
+                        Icon(
+                            imageVector = if (isListening.value) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = if (isListening.value) "Detener voz" else "Hablar",
+                            tint = if (isListening.value) CyberMagenta else CyberCyan
+                        )
+                    }
+                }
+            }
+        }
         Box(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp).background(if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red.copy(alpha = 0.2f); "laughing" -> CyberYellow.copy(alpha = 0.1f); else -> Color.Black.copy(alpha = 0.3f) } } else Color.Black.copy(alpha = 0.3f)).padding(16.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 val emotionIcon = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
@@ -863,18 +916,25 @@ fun NearbyChatScreen(manager: NearbyConnectionManager, isListening: MutableState
             }
         }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp)) {
-            items(manager.messages) { msg -> ChatMessageBubble(msg, isMe = msg.type == "text" || msg.type == "final", useEmojis = useEmojis, useEmotions = useEmotions) }
+            items(manager.messages) { msg -> ChatMessageBubble(msg, isMe = msg.senderId == manager.myId, useEmojis = useEmojis, useEmotions = useEmotions, participantSeed = msg.senderId.ifBlank { msg.senderName }) }
         }
-        Surface(modifier = Modifier.fillMaxWidth(), color = Color.Black.copy(alpha = 0.5f)) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = textInput, onValueChange = { textInput = it }, modifier = Modifier.weight(1f), placeholder = { Text("Escribí algo...", color = Color.Gray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan))
-                    IconButton(onClick = { if (textInput.isNotBlank()) { manager.sendMessage(TeleoNearbyMessage(type = "text", message = textInput)); textInput = "" } }) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar", tint = CyberCyan) }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onBack) { Text("SALIR", color = Color.Red) }
-                    Button(onClick = { if (isListening.value) onPauseVoice() else onStartVoice() }, colors = ButtonDefaults.buttonColors(containerColor = if (isListening.value) CyberMagenta else Color.White)) { Text(if (isListening.value) "DETENER" else "HABLAR", color = if (isListening.value) Color.White else Color.Black, fontWeight = FontWeight.Black) }
+        Surface(
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
+            color = Color.Black.copy(alpha = 0.5f)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(12.dp)) {
+                OutlinedTextField(
+                    value = textInput,
+                    onValueChange = { textInput = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Escribí algo...", color = Color.Gray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan)
+                )
+                IconButton(
+                    onClick = { if (textInput.isNotBlank()) { manager.sendMessage(TeleoNearbyMessage(type = "text", message = textInput)); textInput = "" } }
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar", tint = CyberCyan)
                 }
             }
         }
@@ -882,16 +942,30 @@ fun NearbyChatScreen(manager: NearbyConnectionManager, isListening: MutableState
 }
 
 @Composable
-fun ChatMessageBubble(msg: TeleoNearbyMessage, isMe: Boolean, useEmojis: Boolean, useEmotions: Boolean) {
+fun ChatMessageBubble(msg: TeleoNearbyMessage, isMe: Boolean, useEmojis: Boolean, useEmotions: Boolean, participantSeed: String) {
     if (msg.type == "system") { Text(msg.message, color = Color.Gray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(8.dp), textAlign = TextAlign.Center); return }
     val align = if (isMe) Alignment.End else Alignment.Start
-    val color = if (useEmotions) { when(msg.emotion) { "shouting" -> if (isMe) Color.Red.copy(alpha = 0.2f) else Color.Red.copy(alpha = 0.1f); "laughing" -> if (isMe) CyberYellow.copy(alpha = 0.2f) else CyberYellow.copy(alpha = 0.1f); else -> if (isMe) CyberCyan.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.05f) } } else if (isMe) CyberCyan.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.05f)
-    val textColor = if (useEmotions) { when(msg.emotion) { "shouting" -> Color.Red; "laughing" -> CyberYellow; "whispering" -> Color.Gray; else -> if (isMe) CyberCyan else Color.White } } else if (isMe) CyberCyan else Color.White
+    val participantColor = TeleoChatStyle.colorForParticipant(participantSeed)
+    val color = if (useEmotions) {
+        when (msg.emotion) {
+            "shouting" -> participantColor.copy(alpha = if (isMe) 0.22f else 0.14f)
+            "laughing" -> participantColor.copy(alpha = if (isMe) 0.20f else 0.12f)
+            else -> participantColor.copy(alpha = if (isMe) 0.16f else 0.08f)
+        }
+    } else participantColor.copy(alpha = if (isMe) 0.16f else 0.08f)
+    val textColor = if (useEmotions) {
+        when (msg.emotion) {
+            "shouting" -> TeleoChatStyle.contentColorFor(participantColor)
+            "laughing" -> TeleoChatStyle.contentColorFor(participantColor)
+            "whispering" -> Color.Gray
+            else -> TeleoChatStyle.contentColorFor(participantColor)
+        }
+    } else TeleoChatStyle.contentColorFor(participantColor)
     val text = if (useEmojis) TeleoEmojiMapper.decorate(msg.message) else msg.message
     val prefix = if (useEmotions) { when(msg.emotion) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = align) {
-        if (!isMe && msg.senderName.isNotBlank()) Text(text = msg.senderName, color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 2.dp))
-        Surface(color = color, shape = RoundedCornerShape(12.dp), border = if (isMe) BorderStroke(1.dp, (if (useEmotions && msg.emotion == "shouting") Color.Red else CyberCyan).copy(alpha = 0.3f)) else null) {
+        if (msg.senderName.isNotBlank()) Text(text = msg.senderName, color = participantColor.copy(alpha = 0.9f), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 2.dp))
+        Surface(color = color, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, participantColor.copy(alpha = if (isMe) 0.5f else 0.3f))) {
             Text(text = prefix + text, color = textColor, fontSize = if (useEmotions && msg.emotion == "whispering") 15.sp else 18.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), fontStyle = if (useEmotions && msg.emotion == "whispering") FontStyle.Italic else FontStyle.Normal, fontWeight = if (useEmotions && msg.emotion == "shouting") FontWeight.Bold else FontWeight.Normal)
         }
     }
