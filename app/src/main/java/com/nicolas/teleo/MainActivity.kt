@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -11,6 +13,7 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Base64
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -21,6 +24,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -33,54 +39,56 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
-import android.graphics.Bitmap
-import androidx.camera.core.*
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.viewinterop.AndroidView
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.common.InputImage
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.qrcode.QRCodeWriter
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.nicolas.teleo.ui.theme.TeleoTheme
 import kotlinx.coroutines.delay
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.util.*
 
-// --- MODELOS Y ESTADOS ---
+// --- CONFIGURACIÓN DE DISEÑO ---
+val CyberCyan = Color(0xFF00E5FF)
+val CyberTeal = Color(0xFF1DE9B6)
+val CyberMagenta = Color(0xFFFF00FF)
+val CyberYellow = Color(0xFFFEE715)
+val CyberDark = Color(0xFF0A0E14)
+val ColorPalette = listOf(CyberCyan, CyberTeal, CyberMagenta, CyberYellow, Color(0xFF4FC3F7), Color(0xFF81C784), Color(0xFFFF8A65), Color(0xFFBA68C8))
 
-enum class Screen {
-    Home,
-    PalabraViva,
-    EscribirYMostrar,
-    TeleoCercaEntry,
-    TeleoCercaCreate,
-    TeleoCercaJoin,
-    TeleoCercaChat,
-    Scanner,
-    Profile
-}
+// --- MODELOS ---
+
+enum class Screen { Home, PalabraViva, EscribirYMostrar, TeleoCercaEntry, TeleoCercaCreate, TeleoCercaJoin, TeleoCercaChat, Scanner, Profile, AvatarCamera }
 
 data class TeleoNearbyMessage(
-    val type: String = "", // "partial", "final", "text", "system"
-    val emotion: String = "normal", // "normal", "shouting", "whispering", "laughing"
+    val type: String = "",
+    val emotion: String = "normal",
     val senderId: String = "",
     val senderName: String = "",
+    val senderColor: Int = 0xFF00E5FF.toInt(),
     val currentWord: String = "",
     val currentSentence: String = "",
     val message: String = "",
@@ -88,885 +96,348 @@ data class TeleoNearbyMessage(
 ) {
     fun toJSON(): String {
         val json = JSONObject()
-        json.put("type", type)
-        json.put("emotion", emotion)
-        json.put("senderId", senderId)
-        json.put("senderName", senderName)
-        json.put("currentWord", currentWord)
-        json.put("currentSentence", currentSentence)
-        json.put("message", message)
+        json.put("type", type); json.put("emotion", emotion)
+        json.put("senderId", senderId); json.put("senderName", senderName)
+        json.put("senderColor", senderColor); json.put("currentWord", currentWord)
+        json.put("currentSentence", currentSentence); json.put("message", message)
         json.put("timestamp", timestamp)
         return json.toString()
     }
-
     companion object {
         fun fromJSON(jsonStr: String): TeleoNearbyMessage {
             val json = JSONObject(jsonStr)
             return TeleoNearbyMessage(
-                type = json.optString("type"),
-                emotion = json.optString("emotion", "normal"),
-                senderId = json.optString("senderId"),
-                senderName = json.optString("senderName"),
-                currentWord = json.optString("currentWord"),
-                currentSentence = json.optString("currentSentence"),
-                message = json.optString("message"),
-                timestamp = json.optLong("timestamp")
+                type = json.optString("type"), emotion = json.optString("emotion", "normal"),
+                senderId = json.optString("senderId"), senderName = json.optString("senderName"),
+                senderColor = json.optInt("senderColor", 0xFF00E5FF.toInt()),
+                currentWord = json.optString("currentWord"), currentSentence = json.optString("currentSentence"),
+                message = json.optString("message"), timestamp = json.optLong("timestamp")
             )
         }
     }
 }
 
-// --- MANAGER DE CONEXIÓN CERCANA ---
+// --- MANAGER DE CONEXIÓN ---
 
 class NearbyConnectionManager(private val context: Context) {
     private val connectionsClient = Nearby.getConnectionsClient(context)
     private val STRATEGY = Strategy.P2P_STAR
     private val SERVICE_ID = "com.nicolas.teleo.NEARBY_SERVICE"
+    private val mainHandler = Handler(Looper.getMainLooper())
     
-    var myName = Build.MODEL
-    var myId = UUID.randomUUID().toString()
-    var connectedEndpointId = mutableStateOf<String?>(null)
-    var isAdvertising = mutableStateOf(false)
-    var isDiscovering = mutableStateOf(false)
-    var discoveredEndpoints = mutableStateListOf<Endpoint>()
+    var myName = Build.MODEL; var myId = UUID.randomUUID().toString(); var myColor = 0xFF00E5FF.toInt()
+    var isHost = mutableStateOf(false)
+    var connectedParticipants = mutableStateListOf<Participant>()
+    var pendingRequests = mutableStateListOf<Participant>()
     var messages = mutableStateListOf<TeleoNearbyMessage>()
-    
-    // Estado remoto (lo que el otro está hablando)
-    var remoteWord = mutableStateOf("")
-    var remoteSentence = mutableStateOf("")
-    var remoteEmotion = mutableStateOf("normal")
+    var discoveredEndpoints = mutableStateListOf<Endpoint>()
+    var remoteWord = mutableStateOf(""); var remoteSentence = mutableStateOf(""); var remoteEmotion = mutableStateOf("normal")
 
     data class Endpoint(val id: String, val name: String)
+    data class Participant(val id: String, val name: String)
 
     private val payloadCallback = object : PayloadCallback() {
-        override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            payload.asBytes()?.let { bytes ->
-                val jsonStr = String(bytes)
+        override fun onPayloadReceived(id: String, payload: Payload) {
+            payload.asBytes()?.let { b ->
                 try {
-                    val msg = TeleoNearbyMessage.fromJSON(jsonStr)
-                    handleIncomingMessage(msg)
-                } catch (e: Exception) {
-                    Log.e("TeleoNearby", "Error parseando JSON", e)
-                }
+                    val m = TeleoNearbyMessage.fromJSON(String(b))
+                    mainHandler.post {
+                        if (m.type == "partial") { remoteWord.value = m.currentWord; remoteSentence.value = m.currentSentence; remoteEmotion.value = m.emotion }
+                        else if (m.type == "final" || m.type == "text") { remoteWord.value = ""; remoteSentence.value = ""; remoteEmotion.value = "normal"; messages.add(m) }
+                        else if (m.type == "system") messages.add(m)
+                    }
+                } catch (e: Exception) {}
             }
         }
-
-        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {}
-    }
-
-    private fun handleIncomingMessage(msg: TeleoNearbyMessage) {
-        when (msg.type) {
-            "partial" -> {
-                remoteWord.value = msg.currentWord
-                remoteSentence.value = msg.currentSentence
-                remoteEmotion.value = msg.emotion
-            }
-            "final", "text" -> {
-                remoteWord.value = ""
-                remoteSentence.value = ""
-                remoteEmotion.value = "normal"
-                messages.add(msg)
-            }
-            "system" -> {
-                messages.add(msg)
-            }
-        }
+        override fun onPayloadTransferUpdate(id: String, update: PayloadTransferUpdate) {}
     }
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
-        override fun onConnectionInitiated(endpointId: String, info: com.google.android.gms.nearby.connection.ConnectionInfo) {
-            connectionsClient.acceptConnection(endpointId, payloadCallback)
+        override fun onConnectionInitiated(id: String, info: ConnectionInfo) {
+            if (isHost.value) mainHandler.post {
+                if (pendingRequests.none { it.id == id }) pendingRequests.add(Participant(id, info.endpointName))
+            }
+            else connectionsClient.acceptConnection(id, payloadCallback)
         }
-
-        override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
-            if (result.status.isSuccess) {
-                connectedEndpointId.value = endpointId
-                stopAdvertising()
-                stopDiscovery()
-                messages.add(TeleoNearbyMessage(type = "system", message = "Conectado con éxito"))
+        override fun onConnectionResult(id: String, result: ConnectionResolution) {
+            mainHandler.post {
+                if (result.status.isSuccess) {
+                    val p = pendingRequests.find { it.id == id } ?: Participant(id, "Usuario")
+                    pendingRequests.removeAll { it.id == id }
+                    if (connectedParticipants.none { it.id == id }) connectedParticipants.add(p)
+                    messages.add(TeleoNearbyMessage(type = "system", message = "${p.name} conectado"))
+                } else pendingRequests.removeAll { it.id == id }
             }
         }
-
-        override fun onDisconnected(endpointId: String) {
-            connectedEndpointId.value = null
-            messages.add(TeleoNearbyMessage(type = "system", message = "Desconectado"))
-        }
-    }
-
-    fun startAdvertising() {
-        val options = AdvertisingOptions.Builder().setStrategy(STRATEGY).build()
-        connectionsClient.startAdvertising(myName, SERVICE_ID, connectionLifecycleCallback, options)
-            .addOnSuccessListener { isAdvertising.value = true }
-    }
-
-    fun stopAdvertising() {
-        connectionsClient.stopAdvertising()
-        isAdvertising.value = false
-    }
-
-    fun startDiscovery() {
-        discoveredEndpoints.clear()
-        val options = DiscoveryOptions.Builder().setStrategy(STRATEGY).build()
-        connectionsClient.startDiscovery(SERVICE_ID, object : EndpointDiscoveryCallback() {
-            override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-                discoveredEndpoints.add(Endpoint(endpointId, info.endpointName))
-            }
-            override fun onEndpointLost(endpointId: String) {
-                discoveredEndpoints.removeAll { it.id == endpointId }
-            }
-        }, options).addOnSuccessListener { isDiscovering.value = true }
-    }
-
-    fun stopDiscovery() {
-        connectionsClient.stopDiscovery()
-        isDiscovering.value = false
-    }
-
-    fun requestConnection(endpoint: Endpoint) {
-        connectionsClient.requestConnection(myName, endpoint.id, connectionLifecycleCallback)
-    }
-
-    fun sendMessage(msg: TeleoNearbyMessage) {
-        connectedEndpointId.value?.let { id ->
-            val msgWithIdentity = msg.copy(senderId = myId, senderName = myName)
-            val payload = Payload.fromBytes(msgWithIdentity.toJSON().toByteArray())
-            connectionsClient.sendPayload(id, payload)
-            if (msgWithIdentity.type == "text" || msgWithIdentity.type == "final") {
-                messages.add(msgWithIdentity)
+        override fun onDisconnected(id: String) {
+            mainHandler.post {
+                val p = connectedParticipants.find { it.id == id }; connectedParticipants.removeAll { it.id == id }
+                p?.let { messages.add(TeleoNearbyMessage(type = "system", message = "${it.name} salió")) }
             }
         }
     }
 
-    fun disconnect() {
-        connectedEndpointId.value?.let { connectionsClient.disconnectFromEndpoint(it) }
-        connectedEndpointId.value = null
-        messages.clear()
-        remoteWord.value = ""
-        remoteSentence.value = ""
-    }
+    fun startAdvertising() { mainHandler.post { isHost.value = true; connectionsClient.startAdvertising(myName, SERVICE_ID, connectionLifecycleCallback, AdvertisingOptions.Builder().setStrategy(STRATEGY).build()) } }
+    fun stopAdvertising() { connectionsClient.stopAdvertising() }
+    fun startDiscovery() { mainHandler.post { isHost.value = false; discoveredEndpoints.clear(); connectionsClient.startDiscovery(SERVICE_ID, object : EndpointDiscoveryCallback() { override fun onEndpointFound(id: String, info: DiscoveredEndpointInfo) { if (discoveredEndpoints.none { it.id == id }) discoveredEndpoints.add(Endpoint(id, info.endpointName)) }; override fun onEndpointLost(id: String) { discoveredEndpoints.removeAll { it.id == id } } }, DiscoveryOptions.Builder().setStrategy(STRATEGY).build()) } }
+    fun stopDiscovery() { connectionsClient.stopDiscovery() }
+    fun requestConnection(e: Endpoint) { connectionsClient.requestConnection(myName, e.id, connectionLifecycleCallback) }
+    fun accept(p: Participant) { connectionsClient.acceptConnection(p.id, payloadCallback) }
+    fun reject(p: Participant) { connectionsClient.rejectConnection(p.id); pendingRequests.remove(p) }
+    fun kick(p: Participant) { connectionsClient.disconnectFromEndpoint(p.id); connectedParticipants.remove(p) }
+    fun sendMessage(msg: TeleoNearbyMessage) { val msgW = msg.copy(senderId = myId, senderName = myName, senderColor = myColor); val bytes = msgW.toJSON().toByteArray(); connectedParticipants.forEach { connectionsClient.sendPayload(it.id, Payload.fromBytes(bytes)) }; if (msgW.type == "text" || msgW.type == "final") messages.add(msgW) }
+    fun disconnect() { connectionsClient.stopAllEndpoints(); connectedParticipants.clear(); pendingRequests.clear(); messages.clear(); isHost.value = false }
 }
 
 // --- UTILIDADES ---
 
-object TeleoEmojiMapper {
-    private val mapping = mapOf(
-        "HOLA" to "👋", "CHAU" to "👋", "ADIOS" to "👋",
-        "GRACIAS" to "🙏", "POR FAVOR" to "🥺", "AMOR" to "❤️",
-        "PERRO" to "🐶", "GATO" to "🐱", "CASA" to "🏠",
-        "COMIDA" to "🍕", "SOL" to "☀️", "LLUVIA" to "🌧️",
-        "FUEGO" to "🔥", "FIESTA" to "🎉", "MATE" to "🧉",
-        "JAJA" to "😂", "JEJE" to "😂", "HAHA" to "😂",
-        "FUTBOL" to "⚽", "MIRA" to "👀", "OK" to "✅",
-        "BIEN" to "👍", "MAL" to "👎", "CAFE" to "☕",
-        "CERVEZA" to "🍺", "SALUD" to "🥂"
-    )
-
-    fun decorate(text: String): String {
-        var result = text
-        mapping.forEach { (word, emoji) ->
-            val regex = "\\b$word\\b".toRegex(RegexOption.IGNORE_CASE)
-            result = regex.replace(result) { "${it.value} $emoji" }
-        }
-        return result
-    }
-
-    fun generateQRCode(content: String): Bitmap? {
-        return try {
-            val writer = QRCodeWriter()
-            val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, 512, 512)
-            val width = bitMatrix.width
-            val height = bitMatrix.height
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-            for (x in 0 until width) {
-                for (y in 0 until height) {
-                    bitmap.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-                }
-            }
-            bitmap
-        } catch (e: Exception) {
-            null
-        }
-    }
-}
-
-object TeleoChatStyle {
-    private val palette = listOf(
-        CyberCyan,
-        CyberTeal,
-        CyberMagenta,
-        CyberYellow,
-        Color(0xFF4FC3F7),
-        Color(0xFF81C784),
-        Color(0xFFFF8A65),
-        Color(0xFFBA68C8)
-    )
-
-    fun colorForParticipant(seed: String): Color {
-        if (seed.isBlank()) return CyberCyan
-        return palette[(seed.hashCode() and Int.MAX_VALUE) % palette.size]
-    }
-
-    fun contentColorFor(background: Color): Color {
-        return if (background.luminance() > 0.5f) Color.Black else Color.White
-    }
+object TeleoUtils {
+    fun decorate(t: String): String { var r = t; mapOf("HOLA" to "👋", "CHAU" to "👋", "GRACIAS" to "🙏", "AMOR" to "❤️", "JAJA" to "😂", "MATE" to "🧉").forEach { (w, e) -> r = r.replace("\\b$w\\b".toRegex(RegexOption.IGNORE_CASE)) { "${it.value} $e" } }; return r }
+    fun generateQR(c: String): Bitmap? { try { val m = QRCodeWriter().encode(c, BarcodeFormat.QR_CODE, 512, 512); val b = Bitmap.createBitmap(m.width, m.height, Bitmap.Config.RGB_565); for (x in 0 until m.width) for (y in 0 until m.height) b.setPixel(x, y, if (m.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE); return b } catch (e: Exception) { return null } }
+    fun toB64(b: Bitmap): String { val out = ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.PNG, 100, out); return Base64.encodeToString(out.toByteArray(), Base64.DEFAULT) }
+    fun fromB64(s: String): Bitmap? { try { val b = Base64.decode(s, Base64.DEFAULT); return BitmapFactory.decodeByteArray(b, 0, b.size) } catch (e: Exception) { return null } }
 }
 
 // --- ACTIVIDAD PRINCIPAL ---
 
 class MainActivity : ComponentActivity() {
-    private lateinit var speechRecognizer: SpeechRecognizer
-    private lateinit var recognizerIntent: Intent
-    private lateinit var nearbyManager: NearbyConnectionManager
-    
-    private val currentSentence = mutableStateOf("")
-    private val wordQueue = mutableStateListOf<String>()
-    private val sentenceHistory = mutableStateListOf<String>()
-    private val isProcessingFinal = mutableStateOf(false)
-    private val isListening = mutableStateOf(false)
-    private val hasRecordPermission = mutableStateOf(false)
-    private val lastRms = mutableStateOf(0f)
-    private val currentEmotion = mutableStateOf("normal")
-    private val currentScreen = mutableStateOf(Screen.Home)
-    private val useEmojis = mutableStateOf(true)
-    private val useEmotions = mutableStateOf(true)
-    private val userName = mutableStateOf("")
-    private val userId = mutableStateOf("")
-
-    private val RECORD_AUDIO_REQUEST = 1001
-    private val handler = Handler(Looper.getMainLooper())
+    private lateinit var speechRecognizer: SpeechRecognizer; private lateinit var recognizerIntent: Intent; private lateinit var nearbyManager: NearbyConnectionManager
+    private val currentSentence = mutableStateOf(""); private val wordQueue = mutableStateListOf<String>(); private val sentenceHistory = mutableStateListOf<String>()
+    private val isListening = mutableStateOf(false); private val isProcessingFinal = mutableStateOf(false); private val hasRecordPermission = mutableStateOf(false)
+    private val lastRms = mutableStateOf(0f); private val currentEmotion = mutableStateOf("normal"); private val currentScreen = mutableStateOf(Screen.Home)
+    private val useEmojis = mutableStateOf(true); private val useEmotions = mutableStateOf(true); private val userName = mutableStateOf(""); private val userColor = mutableStateOf(0xFF00E5FF.toInt()); private val userAvatar = mutableStateOf<Bitmap?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
+        super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val prefs = getSharedPreferences("teleo_prefs", Context.MODE_PRIVATE)
-        userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL
-        userId.value = prefs.getString("user_id", null) ?: UUID.randomUUID().toString().also {
-            prefs.edit().putString("user_id", it).apply()
-        }
-
-        nearbyManager = NearbyConnectionManager(this)
-        nearbyManager.myName = userName.value
-        nearbyManager.myId = userId.value
-        initSpeechRecognizer()
-
-        hasRecordPermission.value = checkNearbyPermissions()
-
-        setContent {
-            TeleoTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = CyberDark) {
-                    when (currentScreen.value) {
-                        Screen.Home -> HomeScreen(
-                            useEmojis = useEmojis,
-                            useEmotions = useEmotions,
-                            userName = userName.value,
-                            onNavigate = { currentScreen.value = it }
-                        )
-                        Screen.Profile -> ProfileScreen(
-                            currentName = userName.value,
-                            onSave = { newName ->
-                                userName.value = newName
-                                nearbyManager.myName = newName
-                                prefs.edit().putString("user_name", newName).apply()
-                                currentScreen.value = Screen.Home
-                            },
-                            onBack = { currentScreen.value = Screen.Home }
-                        )
-                        Screen.PalabraViva -> TeleoScreen(
-                            currentSentence = currentSentence,
-                            wordQueue = wordQueue,
-                            sentenceHistory = sentenceHistory,
-                            isListening = isListening,
-                            isProcessingFinal = isProcessingFinal,
-                            hasPermission = hasRecordPermission,
-                            currentEmotion = currentEmotion,
-                            useEmojis = useEmojis.value,
-                            useEmotions = useEmotions.value,
-                            onStart = { startListening() },
-                            onPause = { pauseListening() },
-                            onClear = { 
-                                currentSentence.value = ""
-                                wordQueue.clear()
-                                sentenceHistory.clear()
-                            },
-                            onRequestPermission = { requestPermission() },
-                            onBack = { pauseListening(); currentScreen.value = Screen.Home }
-                        )
-                        Screen.EscribirYMostrar -> WriteAndShowScreen(
-                            useEmojis = useEmojis.value,
-                            onBack = { currentScreen.value = Screen.Home }
-                        )
-                        Screen.TeleoCercaEntry -> TeleoNearbyEntryScreen(
-                            useEmojis = useEmojis,
-                            useEmotions = useEmotions,
-                            onNavigate = { currentScreen.value = it },
-                            onBack = { currentScreen.value = Screen.Home }
-                        )
-                        Screen.TeleoCercaCreate -> CreateNearbyChatScreen(
-                            manager = nearbyManager,
-                            onConnected = { currentScreen.value = Screen.TeleoCercaChat },
-                            onBack = { nearbyManager.stopAdvertising(); currentScreen.value = Screen.TeleoCercaEntry }
-                        )
-                        Screen.TeleoCercaJoin -> JoinNearbyChatScreen(
-                            manager = nearbyManager,
-                            onScan = { currentScreen.value = Screen.Scanner },
-                            onConnected = { currentScreen.value = Screen.TeleoCercaChat },
-                            onBack = { nearbyManager.stopDiscovery(); currentScreen.value = Screen.TeleoCercaEntry }
-                        )
-                        Screen.Scanner -> QRScannerScreen(
-                            onScanResult = { result ->
-                                val endpoint = nearbyManager.discoveredEndpoints.find { it.name == result }
-                                if (endpoint != null) nearbyManager.requestConnection(endpoint)
-                                currentScreen.value = Screen.TeleoCercaJoin
-                            },
-                            onBack = { currentScreen.value = Screen.TeleoCercaJoin }
-                        )
-                        Screen.TeleoCercaChat -> NearbyChatScreen(
-                            manager = nearbyManager,
-                            isListening = isListening,
-                            useEmojis = useEmojis.value,
-                            useEmotions = useEmotions.value,
-                            onStartVoice = { startListening() },
-                            onPauseVoice = { pauseListening() },
-                            onBack = { nearbyManager.disconnect(); currentScreen.value = Screen.Home }
-                        )
-                    }
-                }
+        userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL; userColor.value = prefs.getInt("user_color", 0xFF00E5FF.toInt())
+        prefs.getString("user_avatar", null)?.let { userAvatar.value = TeleoUtils.fromB64(it) }
+        nearbyManager = NearbyConnectionManager(this).apply { myName = userName.value; myColor = userColor.value }
+        initSpeechRecognizer(); hasRecordPermission.value = checkNearbyPermissions()
+        setContent { TeleoTheme { Surface(modifier = Modifier.fillMaxSize(), color = CyberDark) {
+            when (currentScreen.value) {
+                Screen.Home -> HomeScreen(useEmojis, useEmotions, userName.value, userColor.value, userAvatar.value, onNavigate = { currentScreen.value = it })
+                Screen.Profile -> ProfileScreen(userName.value, userColor.value, userAvatar.value, onSave = { n, c -> userName.value = n; userColor.value = c; nearbyManager.myName = n; nearbyManager.myColor = c; prefs.edit().putString("user_name", n).putInt("user_color", c).apply(); currentScreen.value = Screen.Home }, onTakeAvatar = { if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) currentScreen.value = Screen.AvatarCamera else requestPermission() }, onBack = { currentScreen.value = Screen.Home })
+                Screen.AvatarCamera -> AvatarCameraScreen(onCaptured = { b -> userAvatar.value = b; prefs.edit().putString("user_avatar", TeleoUtils.toB64(b)).apply(); currentScreen.value = Screen.Profile }, onBack = { currentScreen.value = Screen.Profile })
+                Screen.PalabraViva -> TeleoScreen(currentSentence, wordQueue, sentenceHistory, isListening, isProcessingFinal, hasRecordPermission, currentEmotion, useEmojis.value, useEmotions.value, onStart = { startListening() }, onPause = { pauseListening() }, onClear = { currentSentence.value = ""; wordQueue.clear(); sentenceHistory.clear() }, onRequestPermission = { requestPermission() }, onBack = { pauseListening(); currentScreen.value = Screen.Home })
+                Screen.EscribirYMostrar -> WriteAndShowScreen(ue = useEmojis.value, onBackAction = { currentScreen.value = Screen.Home })
+                Screen.TeleoCercaEntry -> TeleoNearbyEntryScreen(useEmojis, useEmotions, onNavigate = { currentScreen.value = it }, onBack = { currentScreen.value = Screen.Home })
+                Screen.TeleoCercaCreate -> CreateNearbyChatScreen(nearbyManager, onConnected = { currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopAdvertising(); currentScreen.value = Screen.TeleoCercaEntry })
+                Screen.TeleoCercaJoin -> JoinNearbyChatScreen(nearbyManager, onScan = { if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) currentScreen.value = Screen.Scanner else requestPermission() }, onConnected = { currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopDiscovery(); currentScreen.value = Screen.TeleoCercaEntry })
+                Screen.Scanner -> QRScannerScreen(onScanResult = { r -> nearbyManager.discoveredEndpoints.find { it.name == r }?.let { nearbyManager.requestConnection(it) }; currentScreen.value = Screen.TeleoCercaJoin }, onBack = { currentScreen.value = Screen.TeleoCercaJoin })
+                Screen.TeleoCercaChat -> NearbyChatScreen(nearbyManager, isListening, useEmojis.value, useEmotions.value, onSV = { startListening() }, onPV = { pauseListening() }, onB = { nearbyManager.disconnect(); currentScreen.value = Screen.Home })
             }
-        }
+        } } }
     }
 
-    private fun checkNearbyPermissions(): Boolean {
-        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT))
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
-        return permissions.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
-    }
-
-    private fun requestPermission() {
-        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT))
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
-        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), RECORD_AUDIO_REQUEST)
-    }
-
-    private fun initSpeechRecognizer() {
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-        }
-
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { isProcessingFinal.value = false }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) { 
-                lastRms.value = rmsdB
-                if (isListening.value) currentEmotion.value = determineEmotion(currentSentence.value)
-            }
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onError(error: Int) {
-                if (isListening.value && (error == SpeechRecognizer.ERROR_NO_MATCH || 
-                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || 
-                    error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY)) {
-                    handler.postDelayed({ if (isListening.value) startListening() }, 500)
-                } else if (error != SpeechRecognizer.ERROR_CLIENT) {
-                    isListening.value = false
-                }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val text = matches[0].uppercase()
-                    currentEmotion.value = determineEmotion(text)
-                    processLiveText(text)
-                    if (currentScreen.value == Screen.TeleoCercaChat) {
-                        val words = text.trim().split("\\s+".toRegex())
-                        nearbyManager.sendMessage(TeleoNearbyMessage(
-                            type = "partial",
-                            emotion = currentEmotion.value,
-                            currentWord = words.lastOrNull() ?: "",
-                            currentSentence = text
-                        ))
-                    }
-                }
-            }
-            override fun onResults(results: Bundle?) {
-                isProcessingFinal.value = true
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val finalResult = matches[0].uppercase()
-                    val emotion = determineEmotion(finalResult)
-                    if (finalResult.isNotBlank()) {
-                        if (currentScreen.value == Screen.PalabraViva) {
-                            sentenceHistory.clear()
-                            sentenceHistory.add(finalResult)
-                        } else if (currentScreen.value == Screen.TeleoCercaChat) {
-                            nearbyManager.sendMessage(TeleoNearbyMessage(
-                                type = "final",
-                                emotion = emotion,
-                                message = finalResult
-                            ))
-                        }
-                    }
-                }
-                currentSentence.value = ""
-                wordQueue.clear()
-                currentEmotion.value = "normal"
-                if (isListening.value) handler.postDelayed({ if (isListening.value) startListening() }, 400)
-            }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-    }
-
-    private fun processLiveText(text: String) {
-        if (isProcessingFinal.value) return
-        val upperText = text.uppercase()
-        if (currentSentence.value.isBlank() && upperText.isNotBlank() && currentScreen.value == Screen.PalabraViva) sentenceHistory.clear()
-        if (upperText == currentSentence.value) return
-        val oldWords = currentSentence.value.trim().split("\\s+".toRegex()).filter { it.isNotBlank() }
-        val newWords = upperText.trim().split("\\s+".toRegex()).filter { it.isNotBlank() }
-        currentSentence.value = upperText
-        if (newWords.size > oldWords.size) {
-            for (i in oldWords.size until newWords.size) wordQueue.add(newWords[i])
-        }
-    }
-
-    private fun determineEmotion(text: String): String {
-        if (!useEmotions.value) return "normal"
-        val upper = text.uppercase()
-        return when {
-            upper.contains("JAJA") || upper.contains("HAHA") || upper.contains("JEJE") -> "laughing"
-            lastRms.value > 10f -> "shouting"
-            lastRms.value < 1.5f && lastRms.value > -2f -> "whispering"
-            else -> "normal"
-        }
-    }
-
-    private fun startListening() {
-        if (!checkNearbyPermissions()) { requestPermission(); return }
-        isListening.value = true
-        isProcessingFinal.value = false
-        try { speechRecognizer.startListening(recognizerIntent) } catch (e: Exception) { isListening.value = false }
-    }
-
-    private fun pauseListening() {
-        try { speechRecognizer.stopListening() } catch (_: Exception) {}
-        isListening.value = false
-        wordQueue.clear()
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == RECORD_AUDIO_REQUEST) {
-            hasRecordPermission.value = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-        }
-    }
-
-    override fun onDestroy() {
-        try { speechRecognizer.destroy() } catch (e: Exception) {}
-        nearbyManager.disconnect()
-        super.onDestroy()
-    }
+    private fun checkNearbyPermissions(): Boolean { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); return p.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED } }
+    private fun requestPermission() { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); ActivityCompat.requestPermissions(this, p.toTypedArray(), 1001) }
+    private fun initSpeechRecognizer() { speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this); recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM); putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true) }; speechRecognizer.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { isProcessingFinal.value = false }; override fun onBeginningOfSpeech() {}; override fun onRmsChanged(r: Float) { lastRms.value = r; if (isListening.value) currentEmotion.value = determineEmotion(currentSentence.value) }; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() {}; override fun onError(e: Int) { if (isListening.value && (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 500) else if (e != SpeechRecognizer.ERROR_CLIENT) isListening.value = false }; override fun onPartialResults(pr: Bundle?) { pr?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { t -> currentEmotion.value = determineEmotion(t); processLiveText(t); if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "partial", emotion = currentEmotion.value, currentWord = t.split("\\s+").lastOrNull() ?: "", currentSentence = t)) } }; override fun onResults(r: Bundle?) { isProcessingFinal.value = true; r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { f -> if (f.isNotBlank()) { if (currentScreen.value == Screen.PalabraViva) { sentenceHistory.clear(); sentenceHistory.add(f) } else if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "final", emotion = determineEmotion(f), message = f)) } }; currentSentence.value = ""; wordQueue.clear(); currentEmotion.value = "normal"; if (isListening.value) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 400) }; override fun onEvent(ev: Int, p: Bundle?) {} }) }
+    private fun processLiveText(t: String) { if (isProcessingFinal.value || t == currentSentence.value) return; val old = currentSentence.value.trim().split("\\s+").filter { it.isNotBlank() }.size; val new = t.trim().split("\\s+").filter { it.isNotBlank() }.size; currentSentence.value = t; if (new > old) for (i in old until new) wordQueue.add(t.trim().split("\\s+").filter { it.isNotBlank() }[i]) }
+    private fun determineEmotion(t: String): String { if (!useEmotions.value) return "normal"; val u = t.uppercase(); return when { u.contains("JAJA") || u.contains("HAHA") -> "laughing"; lastRms.value > 10f -> "shouting"; lastRms.value < 1.5f && lastRms.value > -2f -> "whispering"; else -> "normal" } }
+    private fun startListening() { if (!checkNearbyPermissions()) { requestPermission(); return }; isListening.value = true; try { speechRecognizer.startListening(recognizerIntent) } catch (e: Exception) { isListening.value = false } }
+    private fun pauseListening() { try { speechRecognizer.stopListening() } catch (_: Exception) {}; isListening.value = false }
+    override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, gr: IntArray) { super.onRequestPermissionsResult(rc, p, gr); if (rc == 1001) hasRecordPermission.value = gr.isNotEmpty() && gr.all { it == PackageManager.PERMISSION_GRANTED } }
+    override fun onDestroy() { try { speechRecognizer.destroy() } catch (_: Exception) {}; nearbyManager.disconnect(); super.onDestroy() }
 }
-
-// --- COLORES ---
-val CyberCyan = Color(0xFF00E5FF)
-val CyberTeal = Color(0xFF1DE9B6)
-val CyberMagenta = Color(0xFFFF00FF)
-val CyberYellow = Color(0xFFFEE715)
-val CyberDark = Color(0xFF0A0E14)
 
 // --- COMPOSABLES ---
 
 @Composable
-fun HomeScreen(useEmojis: MutableState<Boolean>, useEmotions: MutableState<Boolean>, userName: String, onNavigate: (Screen) -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val activity = context as? android.app.Activity
-
-    Column(
-        modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26)))).padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+fun HomeScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, un: String, uc: Int, ua: Bitmap?, onNavigate: (Screen) -> Unit) {
+    val act = LocalContext.current as? android.app.Activity
+    Column(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26)))).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { activity?.finish() }, modifier = Modifier.size(48.dp).background(Color.Red.copy(alpha = 0.1f), CircleShape).border(1.dp, Color.Red.copy(alpha = 0.4f), CircleShape)) {
-                    Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = Color.Red)
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(text = "TELEO", color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
-                    Text(text = "Hola, $userName", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.clickable { onNavigate(Screen.Profile) })
-                }
+                IconButton(onClick = { act?.finish() }, modifier = Modifier.size(48.dp).background(Color.Red.copy(alpha = 0.1f), CircleShape).border(1.dp, Color.Red.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Close, null, tint = Color.Red) }
+                Spacer(Modifier.width(16.dp))
+                Column { Text("TELEO", color = Color(uc), fontSize = 32.sp, fontWeight = FontWeight.Black); Text("Hola, $un", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.clickable { onNavigate(Screen.Profile) }) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))) {
-                    Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        ConfigToggle(label = "Emojis", checked = useEmojis.value, onCheckedChange = { useEmojis.value = it })
-                        Spacer(modifier = Modifier.width(20.dp))
-                        ConfigToggle(label = "Emociones", checked = useEmotions.value, onCheckedChange = { useEmotions.value = it })
-                    }
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                IconButton(onClick = { onNavigate(Screen.Profile) }, modifier = Modifier.size(48.dp).background(CyberCyan.copy(alpha = 0.1f), CircleShape).border(1.dp, CyberCyan.copy(alpha = 0.4f), CircleShape)) {
-                    Icon(Icons.Default.AccountCircle, contentDescription = "Perfil", tint = CyberCyan)
-                }
+                Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(uc).copy(alpha = 0.2f))) { Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { ConfigToggle("Emojis", ue.value) { ue.value = it }; Spacer(Modifier.width(20.dp)); ConfigToggle("Emociones", uem.value) { uem.value = it } } }
+                Spacer(Modifier.width(16.dp)); IconButton(onClick = { onNavigate(Screen.Profile) }, modifier = Modifier.size(56.dp).background(Color(uc).copy(alpha = 0.1f), CircleShape).border(1.dp, Color(uc).copy(alpha = 0.4f), CircleShape)) { if (ua != null) Image(ua.asImageBitmap(), null, Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop) else Icon(Icons.Default.AccountCircle, null, tint = Color(uc), modifier = Modifier.size(40.dp)) }
             }
         }
         Row(modifier = Modifier.fillMaxSize().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            HomeCard(modifier = Modifier.weight(1f), title = "Palabra Viva", description = "Subtítulos en tiempo real.", icon = Icons.Default.Mic, color = CyberMagenta, onClick = { onNavigate(Screen.PalabraViva) })
-            HomeCard(modifier = Modifier.weight(1f), title = "Escribir", description = "Mensajes a pantalla completa.", icon = Icons.Default.Keyboard, color = CyberTeal, onClick = { onNavigate(Screen.EscribirYMostrar) })
-            HomeCard(modifier = Modifier.weight(1f), title = "Teleo Cerca", description = "Conexión local sin internet.", icon = Icons.Default.Wifi, color = CyberCyan, onClick = { onNavigate(Screen.TeleoCercaEntry) })
+            HomeCard(modifier = Modifier.weight(1f), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
+            HomeCard(modifier = Modifier.weight(1f), t = "Escribir", d = "Pantalla completa.", i = Icons.Default.Keyboard, c = CyberTeal) { onNavigate(Screen.EscribirYMostrar) }
+            HomeCard(modifier = Modifier.weight(1f), t = "Teleo Cerca", d = "Conexión local.", i = Icons.Default.Wifi, c = CyberCyan) { onNavigate(Screen.TeleoCercaEntry) }
         }
     }
 }
 
 @Composable
-fun ProfileScreen(currentName: String, onSave: (String) -> Unit, onBack: () -> Unit) {
-    var nameInput by remember { mutableStateOf(currentName) }
-    Column(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26)))).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Box(modifier = Modifier.size(120.dp).background(CyberCyan.copy(alpha = 0.1f), CircleShape).border(2.dp, CyberCyan, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(80.dp), tint = CyberCyan)
-        }
-        Spacer(modifier = Modifier.height(32.dp))
-        Text("TU NICKNAME EN TELEO", color = Color.Gray, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(16.dp))
-        OutlinedTextField(
-            value = nameInput, onValueChange = { nameInput = it }, modifier = Modifier.width(400.dp), placeholder = { Text("Escribí tu nickname...", color = Color.Gray) }, singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan, unfocusedBorderColor = Color.Gray),
-            textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
-        )
-        Spacer(modifier = Modifier.height(48.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            TextButton(onClick = onBack) { Text("CANCELAR", color = Color.Gray, fontSize = 18.sp) }
-            Button(onClick = { if (nameInput.isNotBlank()) onSave(nameInput) }, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark), shape = RoundedCornerShape(12.dp), modifier = Modifier.height(56.dp).width(200.dp)) {
-                Icon(Icons.Default.Save, contentDescription = null); Spacer(modifier = Modifier.width(8.dp)); Text("GUARDAR", fontSize = 18.sp, fontWeight = FontWeight.Black)
-            }
-        }
-    }
-}
+fun ConfigToggle(l: String, v: Boolean, onC: (Boolean) -> Unit) { Row(verticalAlignment = Alignment.CenterVertically) { Text(l, color = Color.White.copy(0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)); Switch(v, onC, colors = SwitchDefaults.colors(checkedThumbColor = CyberCyan)) } }
 
 @Composable
-fun ConfigToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.width(8.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = CyberCyan, checkedTrackColor = CyberCyan.copy(alpha = 0.5f), uncheckedThumbColor = Color.Gray, uncheckedTrackColor = Color.Gray.copy(alpha = 0.3f)))
-    }
-}
-
-@Composable
-fun HomeCard(title: String, description: String, icon: ImageVector, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(onClick = onClick, modifier = modifier.fillMaxHeight(), shape = RoundedCornerShape(24.dp), color = Color.White.copy(alpha = 0.03f), border = BorderStroke(2.dp, color.copy(alpha = 0.4f))) {
+fun HomeCard(modifier: Modifier, t: String, d: String, i: ImageVector, c: Color, onClick: () -> Unit) {
+    Surface(onClick = onClick, modifier = modifier.fillMaxHeight(), shape = RoundedCornerShape(24.dp), color = Color.White.copy(alpha = 0.03f), border = BorderStroke(2.dp, c.copy(alpha = 0.4f))) {
         Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Box(modifier = Modifier.size(80.dp).background(color.copy(alpha = 0.1f), CircleShape).border(1.dp, color.copy(alpha = 0.3f), CircleShape), contentAlignment = Alignment.Center) {
-                Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(40.dp), tint = color)
-            }
-            Spacer(modifier = Modifier.height(24.dp)); Text(text = title.uppercase(), color = color, fontSize = 20.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-            Spacer(modifier = Modifier.height(12.dp)); Text(text = description, color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp, textAlign = TextAlign.Center, lineHeight = 20.sp)
+            Box(modifier = Modifier.size(80.dp).background(c.copy(alpha = 0.1f), CircleShape).border(1.dp, c.copy(0.3f), CircleShape), contentAlignment = Alignment.Center) { Icon(i, null, modifier = Modifier.size(40.dp), tint = c) }
+            Spacer(Modifier.height(24.dp)); Text(t.uppercase(), color = c, fontSize = 20.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Text(d, color = Color.White.copy(0.5f), fontSize = 14.sp, textAlign = TextAlign.Center)
         }
     }
 }
 
 @Composable
-fun TeleoScreen(currentSentence: MutableState<String>, wordQueue: MutableList<String>, sentenceHistory: List<String>, isListening: MutableState<Boolean>, isProcessingFinal: MutableState<Boolean>, hasPermission: MutableState<Boolean>, currentEmotion: MutableState<String>, useEmojis: Boolean, useEmotions: Boolean, onStart: () -> Unit, onPause: () -> Unit, onClear: () -> Unit, onRequestPermission: () -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    var activeWord by remember { mutableStateOf("") }
-    val totalChars = currentSentence.value.length + sentenceHistory.sumOf { it.length }
-    val baseFontSize = when { totalChars < 50 -> 60.sp; totalChars < 120 -> 45.sp; totalChars < 250 -> 32.sp; totalChars < 500 -> 26.sp; else -> 22.sp }
-    LaunchedEffect(wordQueue.size, isProcessingFinal.value) {
-        if (isProcessingFinal.value) { activeWord = ""; wordQueue.clear() }
-        else if (wordQueue.isNotEmpty()) { while (wordQueue.isNotEmpty()) { activeWord = wordQueue.removeAt(0); delay(350) }; delay(350); activeWord = "" }
-    }
-    Box(modifier = modifier.fillMaxSize().background(CyberDark)) {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(modifier = Modifier.height(40.dp))
-            val emotionIcon = if (useEmotions) { when(currentEmotion.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
-            if (currentSentence.value.isNotBlank()) {
-                val text = if (useEmojis) TeleoEmojiMapper.decorate(currentSentence.value) else currentSentence.value
-                Text(text = emotionIcon + text, color = if (useEmotions) { when(currentEmotion.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; "whispering" -> Color.Gray; else -> if (activeWord.isNotBlank()) CyberMagenta.copy(alpha = 0.25f) else CyberMagenta } } else if (activeWord.isNotBlank()) CyberMagenta.copy(alpha = 0.25f) else CyberMagenta, fontSize = if (useEmotions && currentEmotion.value == "shouting") (baseFontSize.value * 1.0f).sp else (baseFontSize.value * 0.8f).sp, fontWeight = if (useEmotions && currentEmotion.value == "shouting") FontWeight.Black else FontWeight.ExtraBold, textAlign = TextAlign.Center, lineHeight = (baseFontSize.value * 1.0f).sp, fontStyle = if (useEmotions && currentEmotion.value == "whispering") FontStyle.Italic else FontStyle.Normal, modifier = Modifier.fillMaxWidth().animateContentSize())
-            }
-            sentenceHistory.forEach { history ->
-                val text = if (useEmojis) TeleoEmojiMapper.decorate(history.uppercase()) else history.uppercase()
-                Text(text = text, color = if (useEmotions) { when(currentEmotion.value) { "shouting" -> Color.Red.copy(alpha = 0.7f); "laughing" -> CyberYellow.copy(alpha = 0.7f); else -> if (activeWord.isNotBlank()) CyberCyan.copy(alpha = 0.15f) else CyberCyan } } else if (activeWord.isNotBlank()) CyberCyan.copy(alpha = 0.15f) else CyberCyan, fontSize = baseFontSize, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, lineHeight = (baseFontSize.value * 1.2f).sp, modifier = Modifier.fillMaxWidth().animateContentSize())
-            }
+fun ProfileScreen(cn: String, cc: Int, ca: Bitmap?, onSave: (String, Int) -> Unit, onTakeAvatar: () -> Unit, onBack: () -> Unit) {
+    var n by remember { mutableStateOf(cn) }; var c by remember { mutableStateOf(cc) }
+    Column(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26)))).padding(32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("PERFIL", color = Color(c), fontSize = 24.sp, fontWeight = FontWeight.Black); Spacer(Modifier.size(48.dp)) }
+        Spacer(Modifier.height(24.dp))
+        Box(modifier = Modifier.size(140.dp).clickable { onTakeAvatar() }, contentAlignment = Alignment.Center) {
+            if (ca != null) Image(ca.asImageBitmap(), null, Modifier.fillMaxSize().clip(CircleShape).border(3.dp, Color(c), CircleShape), contentScale = ContentScale.Crop)
+            else Box(modifier = Modifier.fillMaxSize().background(Color(c).copy(alpha = 0.1f), CircleShape).border(2.dp, Color(c), CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Default.AddAPhoto, null, modifier = Modifier.size(60.dp), tint = Color(c)) }
+            Surface(modifier = Modifier.align(Alignment.BottomEnd).size(40.dp), shape = CircleShape, color = Color.DarkGray) { Icon(Icons.Default.Edit, null, modifier = Modifier.padding(8.dp), tint = Color.White) }
         }
-        if (activeWord.isNotBlank()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                AnimatedContent(targetState = activeWord, transitionSpec = { (fadeIn(animationSpec = tween(150)) + scaleIn(initialScale = 0.9f)) togetherWith fadeOut(animationSpec = tween(100)) }, label = "activeWordAnimation") { target ->
-                    val text = if (useEmojis) TeleoEmojiMapper.decorate(target) else target
-                    Text(text = text, color = if (useEmotions) { when(currentEmotion.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; else -> Color.White } } else Color.White, fontSize = if (useEmotions && currentEmotion.value == "shouting") 180.sp else 160.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, fontStyle = FontStyle.Italic)
-                }
-            }
+        Spacer(Modifier.height(32.dp)); Text("NICKNAME", color = Color.Gray, fontSize = 12.sp); OutlinedTextField(n, { n = it }, modifier = Modifier.width(300.dp), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(c)))
+        Spacer(Modifier.height(32.dp)); Text("COLOR", color = Color.Gray, fontSize = 12.sp)
+        LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.height(110.dp).width(240.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(ColorPalette) { color -> Box(modifier = Modifier.size(45.dp).background(color, CircleShape).border(if (c == color.value.toLong().toInt()) 3.dp else 0.dp, Color.White, CircleShape).clickable { c = color.value.toLong().toInt() }) }
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White) }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(modifier = Modifier.size(8.dp).background(if (isListening.value) CyberTeal else Color.Red.copy(alpha = 0.4f), CircleShape))
-                Text(text = if (isListening.value) "ONLINE" else "OFFLINE", color = if (isListening.value) CyberTeal else Color.Red.copy(alpha = 0.4f), fontSize = 10.sp)
-            }
-        }
-        Surface(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = Color.Transparent) {
-            Row(modifier = Modifier.padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterHorizontally)) {
-                if (!hasPermission.value) { TextButton(onClick = onRequestPermission) { Text("PEDIR PERMISO", color = Color.Red) } }
-                else {
-                    TextButton(onClick = onStart, enabled = !isListening.value) { Text("HABLAR", color = if (!isListening.value) CyberCyan else CyberCyan.copy(alpha = 0.3f), fontSize = 20.sp, fontWeight = FontWeight.Black) }
-                    TextButton(onClick = onPause, enabled = isListening.value) { Text("PAUSA", color = if (isListening.value) CyberMagenta else CyberMagenta.copy(alpha = 0.3f), fontSize = 20.sp, fontWeight = FontWeight.Black) }
-                    TextButton(onClick = onClear) { Text("RESET", color = CyberYellow) }
-                }
-            }
-        }
+        Spacer(Modifier.height(48.dp)); Button(onClick = { if (n.isNotBlank()) onSave(n, c) }, modifier = Modifier.height(56.dp).width(200.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(c), contentColor = CyberDark)) { Icon(Icons.Default.Save, null); Text("GUARDAR", fontWeight = FontWeight.Black) }
     }
 }
 
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 @Composable
-fun WriteAndShowScreen(useEmojis: Boolean, onBack: () -> Unit) {
-    var textInput by remember { mutableStateOf("") }
-    var isShowingFullscreen by remember { mutableStateOf(false) }
-    var fontSize by remember { mutableFloatStateOf(48f) }
-    var errorMessage by remember { mutableStateOf("") }
-    if (isShowingFullscreen) { FullscreenMessageView(text = textInput, fontSize = fontSize, useEmojis = useEmojis, onClose = { isShowingFullscreen = false }, onFontSizeChange = { fontSize = it }, onClear = { textInput = ""; isShowingFullscreen = false }) }
-    else {
-        Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White) }
-                Text("ESCRIBIR Y MOSTRAR", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.size(48.dp))
-            }
-            OutlinedTextField(value = textInput, onValueChange = { textInput = it; if (it.isNotBlank()) errorMessage = "" }, modifier = Modifier.fillMaxWidth().weight(1f), label = { Text("Escribí tu mensaje aquí...", color = Color.Gray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan, unfocusedBorderColor = Color.Gray), textStyle = LocalTextStyle.current.copy(fontSize = 20.sp))
-            if (errorMessage.isNotBlank()) Text(errorMessage, color = Color.Red, modifier = Modifier.padding(vertical = 8.dp))
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Button(onClick = { textInput = "" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) { Text("LIMPIAR") }
-                Button(onClick = { if (textInput.isBlank()) errorMessage = "Escribí una frase primero" else isShowingFullscreen = true }, modifier = Modifier.weight(1.5f), colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("MOSTRAR", fontWeight = FontWeight.Bold) }
-            }
-        }
-    }
-}
-
-@Composable
-fun FullscreenMessageView(text: String, fontSize: Float, useEmojis: Boolean, onClose: () -> Unit, onFontSizeChange: (Float) -> Unit, onClear: () -> Unit) {
-    val decoratedText = if (useEmojis) TeleoEmojiMapper.decorate(text) else text
+fun AvatarCameraScreen(onCaptured: (Bitmap) -> Unit, onBack: () -> Unit) {
+    val ctx = LocalContext.current; val lco = androidx.lifecycle.compose.LocalLifecycleOwner.current; val cpf = remember { ProcessCameraProvider.getInstance(ctx) }; var ic: ImageCapture? by remember { mutableStateOf(null) }
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text(text = decoratedText, color = Color.White, fontSize = fontSize.sp, textAlign = TextAlign.Center, lineHeight = (fontSize * 1.2).sp) }
-        Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            CyberControlBotton("A-") { if (fontSize > 28) onFontSizeChange(fontSize - 8f) }
-            CyberControlBotton("A+") { if (fontSize < 96) onFontSizeChange(fontSize + 8f) }
-        }
-        Row(modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            TextButton(onClick = onClose) { Text("EDITAR", color = CyberCyan) }
-            TextButton(onClick = onClear) { Text("LIMPIAR", color = CyberYellow) }
+        AndroidView(factory = { c -> PreviewView(c).also { pv -> cpf.addListener({ val cp = cpf.get(); val pr = Preview.Builder().build().also { it.setSurfaceProvider(pv.surfaceProvider) }; ic = ImageCapture.Builder().build(); try { cp.unbindAll(); cp.bindToLifecycle(lco, CameraSelector.DEFAULT_FRONT_CAMERA, pr, ic) } catch (e: Exception) {} }, ContextCompat.getMainExecutor(c)) } }, modifier = Modifier.fillMaxSize())
+        Box(modifier = Modifier.align(Alignment.Center).size(280.dp).border(2.dp, Color.White.copy(alpha = 0.5f), CircleShape))
+        Row(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp), horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(64.dp).background(Color.White.copy(alpha = 0.1f), CircleShape)) { Icon(Icons.Default.Close, null, tint = Color.White) }
+            IconButton(onClick = { ic?.takePicture(ContextCompat.getMainExecutor(ctx), object : ImageCapture.OnImageCapturedCallback() { override fun onCaptureSuccess(image: ImageProxy) { val b = image.planes[0].buffer; val bytes = ByteArray(b.remaining()); b.get(bytes); val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size); val m = Math.min(bmp.width, bmp.height); val sq = Bitmap.createBitmap(bmp, (bmp.width - m) / 2, (bmp.height - m) / 2, m, m); onCaptured(Bitmap.createScaledBitmap(sq, 256, 256, true)); image.close() } }) }, modifier = Modifier.size(80.dp).background(Color.White, CircleShape).border(4.dp, CyberCyan, CircleShape)) { Icon(Icons.Default.Camera, null, modifier = Modifier.size(40.dp), tint = Color.Black) }
         }
     }
 }
 
 @Composable
-fun CyberControlBotton(text: String, onClick: () -> Unit) {
-    Box(modifier = Modifier.size(48.dp).border(1.dp, CyberCyan, CircleShape).background(Color.White.copy(alpha = 0.1f), CircleShape).clickable { onClick() }, contentAlignment = Alignment.Center) { Text(text, color = CyberCyan, fontWeight = FontWeight.Bold) }
+fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<String>, isl: MutableState<Boolean>, ipf: MutableState<Boolean>, hp: MutableState<Boolean>, ce: MutableState<String>, ue: Boolean, uem: Boolean, onStart: () -> Unit, onPause: () -> Unit, onClear: () -> Unit, onRequestPermission: () -> Unit, onBack: () -> Unit) {
+    var aw by remember { mutableStateOf("") }; val fs = when { (cs.value.length + sh.sumOf { it.length }) < 50 -> 60.sp; (cs.value.length + sh.sumOf { it.length }) < 120 -> 45.sp; else -> 32.sp }
+    LaunchedEffect(wq.size, ipf.value) { if (ipf.value) { aw = ""; wq.clear() } else if (wq.isNotEmpty()) { while (wq.isNotEmpty()) { aw = wq.removeAt(0); delay(350) }; delay(350); aw = "" } }
+    Box(modifier = Modifier.fillMaxSize().background(CyberDark)) {
+        Column(modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = Modifier.height(40.dp)); val ei = if (uem) { when(ce.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
+            if (cs.value.isNotBlank()) Text(ei + (if (ue) TeleoUtils.decorate(cs.value) else cs.value), color = if (uem) { when(ce.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; "whispering" -> Color.Gray; else -> if (aw.isNotBlank()) CyberMagenta.copy(alpha = 0.25f) else CyberMagenta } } else CyberMagenta, fontSize = if (uem && ce.value == "shouting") 60.sp else 48.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+            sh.forEach { Text(text = if (ue) TeleoUtils.decorate(it) else it, color = if (aw.isNotBlank()) CyberCyan.copy(alpha = 0.15f) else CyberCyan, fontSize = fs, fontWeight = FontWeight.Black, textAlign = TextAlign.Center) }
+        }
+        if (aw.isNotBlank()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { AnimatedContent(aw, transitionSpec = { (fadeIn(tween(150)) + scaleIn()) togetherWith fadeOut(tween(100)) }, label = "") { t -> Text(text = if (ue) TeleoUtils.decorate(t) else t, color = Color.White, fontSize = 160.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic) } }
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { Box(modifier = Modifier.size(8.dp).background(if (isl.value) CyberTeal else Color.Red, CircleShape)); Text(text = if (isl.value) "ONLINE" else "OFFLINE", color = if (isl.value) CyberTeal else Color.Red, fontSize = 10.sp) } }
+        Surface(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = Color.Transparent) { Row(modifier = Modifier.padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterHorizontally)) { if (!hp.value) TextButton(onClick = onRequestPermission) { Text("PEDIR PERMISO", color = Color.Red) } else { TextButton(onClick = onStart, enabled = !isl.value) { Text("HABLAR", color = if (!isl.value) CyberCyan else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onPause, enabled = isl.value) { Text("PAUSA", color = if (isl.value) CyberMagenta else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onClear) { Text("RESET", color = CyberYellow) } } } }
+    }
 }
 
 @Composable
-fun TeleoNearbyEntryScreen(useEmojis: MutableState<Boolean>, useEmotions: MutableState<Boolean>, onNavigate: (Screen) -> Unit, onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White) }
-            Text("TELEO CERCA", color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black)
-            Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { ConfigToggle(label = "Emojis", checked = useEmojis.value, onCheckedChange = { useEmojis.value = it }) } }
-        }
-        Spacer(modifier = Modifier.height(32.dp))
-        Row(modifier = Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            HomeCard(modifier = Modifier.weight(1f), title = "Crear Charla", description = "Visible para otros.", icon = Icons.Default.Add, color = CyberCyan, onClick = { onNavigate(Screen.TeleoCercaCreate) })
-            HomeCard(modifier = Modifier.weight(1f), title = "Unirme", description = "Busca una charla.", icon = Icons.Default.Search, color = CyberTeal, onClick = { onNavigate(Screen.TeleoCercaJoin) })
-        }
-    }
+fun WriteAndShowScreen(ue: Boolean, onBackAction: () -> Unit) {
+    var t by remember { mutableStateOf("") }; var s by remember { mutableStateOf(false) }; var f by remember { mutableStateOf(48f) }
+    if (s) Box(modifier = Modifier.fillMaxSize().background(Color.Black)) { Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text(text = if (ue) TeleoUtils.decorate(t) else t, color = Color.White, fontSize = f.sp, textAlign = TextAlign.Center) }; Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) { IconButton(onClick = { f -= 8f }, modifier = Modifier.size(48.dp).border(1.dp, CyberCyan, CircleShape)) { Text("A-", color = CyberCyan) }; IconButton(onClick = { f += 8f }, modifier = Modifier.size(48.dp).border(1.dp, CyberCyan, CircleShape)) { Text("A+", color = CyberCyan) } }; Row(modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) { TextButton(onClick = { s = false }) { Text("EDITAR", color = CyberCyan) }; TextButton(onClick = { t = ""; s = false }) { Text("LIMPIAR", color = CyberYellow) } } }
+    else Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) { Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBackAction, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Text("ESCRIBIR", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.size(48.dp)) }; OutlinedTextField(value = t, onValueChange = { t = it }, modifier = Modifier.fillMaxWidth().weight(1f), label = { Text("Mensaje...") }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan)); Row(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) { Button(onClick = { t = "" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) { Text("LIMPIAR") }; Button(onClick = { if (t.isNotBlank()) s = true }, modifier = Modifier.weight(1.5f), colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("MOSTRAR", fontWeight = FontWeight.Bold) } } }
+}
+
+@Composable
+fun TeleoNearbyEntryScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, onNavigate: (Screen) -> Unit, onBack: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Text("TELEO CERCA", color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black); Surface(modifier = Modifier.padding(vertical = 4.dp), shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.05f)) { Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { ConfigToggle("Emojis", ue.value) { ue.value = it } } } }; Spacer(modifier = Modifier.height(32.dp)); Row(modifier = Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) { HomeCard(modifier = Modifier.weight(1f), t = "Crear Charla", d = "Modo Host.", i = Icons.Default.Add, c = CyberCyan) { onNavigate(Screen.TeleoCercaCreate) }; HomeCard(modifier = Modifier.weight(1f), t = "Unirme", d = "Buscar Host.", i = Icons.Default.Search, c = CyberTeal) { onNavigate(Screen.TeleoCercaJoin) } } }
 }
 
 @Composable
 fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> Unit, onBack: () -> Unit) {
-    val qrBitmap = remember { TeleoEmojiMapper.generateQRCode(manager.myName) }
+    val qrb = remember { TeleoUtils.generateQR(manager.myName) }
     LaunchedEffect(Unit) { manager.startAdvertising() }
-    LaunchedEffect(manager.connectedEndpointId.value) { if (manager.connectedEndpointId.value != null) onConnected() }
     Column(modifier = Modifier.fillMaxSize().background(CyberDark).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.Home, contentDescription = "Volver", tint = Color.Gray) }
-            Spacer(modifier = Modifier.weight(1f)); Text("CREAR CHARLA", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.weight(1f)); Spacer(modifier = Modifier.size(48.dp))
-        }
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) } ; Text("HOST: CREAR CHARLA", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.size(48.dp)) }
         Spacer(modifier = Modifier.height(32.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp)) {
-            Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.size(240.dp).padding(8.dp)) { qrBitmap?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "QR", modifier = Modifier.fillMaxSize()) } }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("NOMBRE DEL DISPOSITIVO", color = Color.Gray, fontSize = 14.sp)
-                Text(manager.myName, color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black)
-                Spacer(modifier = Modifier.height(24.dp)); CircularProgressIndicator(color = CyberCyan); Spacer(modifier = Modifier.height(16.dp)); Text("Escaneá el QR para conectarte", color = Color.White.copy(alpha = 0.6f))
+            Surface(modifier = Modifier.size(240.dp).padding(8.dp), shape = RoundedCornerShape(16.dp), color = Color.White) { qrb?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "QR", modifier = Modifier.fillMaxSize()) } }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ID DISPOSITIVO", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black); Spacer(modifier = Modifier.height(24.dp)); CircularProgressIndicator(color = CyberCyan); Spacer(modifier = Modifier.height(16.dp)); Text(text = "Esperando solicitudes...", color = Color.White.copy(alpha = 0.6f)) }
+        }
+        if (manager.pendingRequests.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(32.dp))
+            Surface(modifier = Modifier.fillMaxWidth(0.8f), shape = RoundedCornerShape(16.dp), color = Color.White.copy(alpha = 0.1f)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "SOLICITUDES", color = CyberCyan, fontWeight = FontWeight.Bold)
+                    manager.pendingRequests.forEach { p ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = p.name, color = Color.White); Row { TextButton(onClick = { manager.reject(p) }) { Text("RECHAZAR", color = Color.Red) }; Button(onClick = { manager.accept(p) }, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("ACEPTAR") } }
+                        }
+                    }
+                }
             }
         }
+        if (manager.connectedParticipants.isNotEmpty()) LaunchedEffect(Unit) { onConnected() }
     }
 }
 
 @Composable
 fun JoinNearbyChatScreen(manager: NearbyConnectionManager, onScan: () -> Unit, onConnected: () -> Unit, onBack: () -> Unit) {
     LaunchedEffect(Unit) { manager.startDiscovery() }
-    LaunchedEffect(manager.connectedEndpointId.value) { if (manager.connectedEndpointId.value != null) onConnected() }
+    if (manager.connectedParticipants.isNotEmpty()) LaunchedEffect(Unit) { onConnected() }
     Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.Home, contentDescription = "Volver", tint = Color.Gray) }
-            Spacer(modifier = Modifier.width(16.dp)); Text("UNIRSE A CHARLA", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.weight(1f))
-            Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark), shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Default.QrCodeScanner, contentDescription = null); Spacer(modifier = Modifier.width(8.dp)); Text("ESCANEAR QR", fontWeight = FontWeight.Bold)
-            }
-        }
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("UNIRSE", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.QrCodeScanner, null); Spacer(modifier = Modifier.width(8.dp)); Text("ESCANEAR") } }
         Spacer(modifier = Modifier.height(16.dp))
-        if (manager.discoveredEndpoints.isEmpty()) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { CircularProgressIndicator(color = CyberCyan.copy(alpha = 0.3f)); Spacer(modifier = Modifier.height(16.dp)); Text("Buscando dispositivos...", color = Color.Gray) } }
-        } else {
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(manager.discoveredEndpoints) { endpoint ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable { manager.requestConnection(endpoint) }, colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f))) {
-                        Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Text(endpoint.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.weight(1f)); Text("CONECTAR >", color = CyberCyan, fontSize = 14.sp) }
-                    }
-                }
-            }
-        }
+        if (manager.discoveredEndpoints.isEmpty()) Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { CircularProgressIndicator(color = CyberCyan.copy(alpha = 0.3f)); Text(text = "Buscando...", color = Color.Gray) } }
+        else LazyColumn(modifier = Modifier.weight(1f)) { items(manager.discoveredEndpoints) { e -> Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable { manager.requestConnection(e) }, colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f))) { Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Text(e.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.weight(1f)); Text("SOLICITAR >", color = CyberCyan, fontSize = 14.sp) } } } }
     }
 }
 
 @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 @Composable
 fun QRScannerScreen(onScanResult: (String) -> Unit, onBack: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-    var hasScanned by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current; val lco = androidx.lifecycle.compose.LocalLifecycleOwner.current; val cpf = remember { ProcessCameraProvider.getInstance(ctx) }; var hs by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                val executor = ContextCompat.getMainExecutor(ctx)
-                cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-                    val preview = androidx.camera.core.Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
-                    val imageAnalysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
-                    val scanner = BarcodeScanning.getClient(BarcodeScannerOptions.Builder().build())
-                    imageAnalysis.setAnalyzer(executor) { imageProxy ->
-                        val mediaImage = imageProxy.image
-                        if (mediaImage != null && !hasScanned) {
-                            scanner.process(InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees))
-                                .addOnSuccessListener { barcodes -> barcodes.firstOrNull()?.rawValue?.let { hasScanned = true; onScanResult(it) } }
-                                .addOnCompleteListener { imageProxy.close() }
-                        } else imageProxy.close()
-                    }
-                    try { cameraProvider.unbindAll(); cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis) } catch (e: Exception) { Log.e("TeleoScanner", "Error", e) }
-                }, executor); previewView
-            }, modifier = Modifier.fillMaxSize())
+        AndroidView(factory = { c -> PreviewView(c).also { pv -> cpf.addListener({ try { val cp = cpf.get(); val pr = Preview.Builder().build().also { it.setSurfaceProvider(pv.surfaceProvider) }; val ia = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build(); val sc = BarcodeScanning.getClient(BarcodeScannerOptions.Builder().build()); ia.setAnalyzer(ContextCompat.getMainExecutor(c)) { ip -> val mi = ip.image; if (mi != null && !hs) sc.process(InputImage.fromMediaImage(mi, ip.imageInfo.rotationDegrees)).addOnSuccessListener { b -> b.firstOrNull()?.rawValue?.let { hs = true; onScanResult(it) } }.addOnCompleteListener { ip.close() } else ip.close() }; cp.unbindAll(); cp.bindToLifecycle(lco, CameraSelector.DEFAULT_BACK_CAMERA, pr, ia) } catch (e: Exception) {} }, ContextCompat.getMainExecutor(c)) } }, modifier = Modifier.fillMaxSize())
         Box(modifier = Modifier.fillMaxSize().padding(64.dp).border(2.dp, CyberCyan, RoundedCornerShape(24.dp)))
-        IconButton(onClick = onBack, modifier = Modifier.padding(24.dp).align(Alignment.TopStart).background(Color.Black.copy(alpha = 0.5f), CircleShape)) { Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = Color.White) }
-        Text("Enfocá el código QR del otro dispositivo", color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp), textAlign = TextAlign.Center)
+        IconButton(onClick = onBack, modifier = Modifier.padding(24.dp).align(Alignment.TopStart).background(Color.Black.copy(alpha = 0.5f), CircleShape)) { Icon(Icons.Default.Close, "Cerrar", tint = Color.White) }
     }
 }
 
 @Composable
-fun NearbyChatScreen(manager: NearbyConnectionManager, isListening: MutableState<Boolean>, useEmojis: Boolean, useEmotions: Boolean, onStartVoice: () -> Unit, onPauseVoice: () -> Unit, onBack: () -> Unit) {
-    var textInput by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
-    LaunchedEffect(manager.messages.size) { if (manager.messages.isNotEmpty()) listState.animateScrollToItem(manager.messages.size - 1) }
+fun NearbyChatScreen(manager: NearbyConnectionManager, isListening: MutableState<Boolean>, useEmojis: Boolean, useEmotions: Boolean, onSV: () -> Unit, onPV: () -> Unit, onB: () -> Unit) {
+    var ti by remember { mutableStateOf("") }; val ls = rememberLazyListState(); val fm = LocalFocusManager.current; val itp = ti.isNotEmpty(); var sp by remember { mutableStateOf(false) }
+    LaunchedEffect(manager.messages.size) { if (manager.messages.isNotEmpty()) ls.animateScrollToItem(manager.messages.size - 1) }
     Column(modifier = Modifier.fillMaxSize().background(CyberDark)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) {
-                Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White)
-            }
-            Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.25f))) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                    Box(modifier = Modifier.size(8.dp).background(if (isListening.value) CyberTeal else Color.Red.copy(alpha = 0.4f), CircleShape))
+        AnimatedVisibility(visible = !itp) {
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onB, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (manager.isHost.value) IconButton(onClick = { sp = !sp }, modifier = Modifier.size(48.dp).background(CyberTeal.copy(alpha = 0.1f), CircleShape)) { Icon(Icons.Default.Group, null, tint = CyberTeal) }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = if (isListening.value) "ONLINE" else "OFFLINE", color = if (isListening.value) CyberTeal else Color.Red.copy(alpha = 0.4f), fontSize = 10.sp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    IconButton(onClick = { if (isListening.value) onPauseVoice() else onStartVoice() }, modifier = Modifier.size(36.dp).background(if (isListening.value) CyberMagenta.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f), CircleShape)) {
-                        Icon(
-                            imageVector = if (isListening.value) Icons.Default.MicOff else Icons.Default.Mic,
-                            contentDescription = if (isListening.value) "Detener voz" else "Hablar",
-                            tint = if (isListening.value) CyberMagenta else CyberCyan
-                        )
-                    }
+                    Surface(modifier = Modifier, shape = RoundedCornerShape(16.dp), color = Color.White.copy(alpha = 0.05f), border = BorderStroke(1.dp, Color(manager.myColor).copy(alpha = 0.25f))) { Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.size(8.dp).background(if (isListening.value) CyberTeal else Color.Red, CircleShape)); Spacer(modifier = Modifier.width(8.dp)); Text(text = if (isListening.value) "ON" else "OFF", color = if (isListening.value) CyberTeal else Color.Red, fontSize = 10.sp); Spacer(modifier = Modifier.width(12.dp)); IconButton(onClick = { if (isListening.value) onPV() else onSV() }, modifier = Modifier.size(36.dp).background(if (isListening.value) CyberMagenta.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f), CircleShape)) { Icon(imageVector = if (isListening.value) Icons.Default.MicOff else Icons.Default.Mic, contentDescription = null, tint = if (isListening.value) CyberMagenta else Color(manager.myColor)) } } }
                 }
             }
         }
-        Box(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp).background(if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red.copy(alpha = 0.2f); "laughing" -> CyberYellow.copy(alpha = 0.1f); else -> Color.Black.copy(alpha = 0.3f) } } else Color.Black.copy(alpha = 0.3f)).padding(16.dp), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                val emotionIcon = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
-                if (manager.remoteWord.value.isNotBlank()) {
-                    val text = if (useEmojis) TeleoEmojiMapper.decorate(manager.remoteWord.value.uppercase()) else manager.remoteWord.value.uppercase()
-                    Text(emotionIcon + text, color = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; else -> Color.White } } else Color.White, fontSize = if (useEmotions && manager.remoteEmotion.value == "shouting") 80.sp else 64.sp, fontWeight = FontWeight.Black, lineHeight = 72.sp)
-                }
-                if (manager.remoteSentence.value.isNotBlank()) {
-                    val text = if (useEmojis) TeleoEmojiMapper.decorate(manager.remoteSentence.value) else manager.remoteSentence.value
-                    Text(text, color = if (useEmotions && manager.remoteEmotion.value == "whispering") Color.Gray else CyberTeal, fontSize = if (useEmotions && manager.remoteEmotion.value == "whispering") 18.sp else 24.sp, textAlign = TextAlign.Center, lineHeight = 32.sp, fontStyle = if (useEmotions && manager.remoteEmotion.value == "whispering") FontStyle.Italic else FontStyle.Normal)
+        if (sp && manager.isHost.value) {
+            Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.05f)) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text(text = "PARTICIPANTES", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    manager.connectedParticipants.forEach { p -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(text = p.name, color = Color.White); IconButton(onClick = { manager.kick(p) }) { Icon(Icons.Default.PersonRemove, null, tint = Color.Red) } } }
                 }
             }
         }
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp)) {
-            items(manager.messages) { msg -> ChatMessageBubble(msg, isMe = msg.senderId == manager.myId, useEmojis = useEmojis, useEmotions = useEmotions, participantSeed = msg.senderId.ifBlank { msg.senderName }) }
-        }
-        Surface(
-            modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
-            color = Color.Black.copy(alpha = 0.5f)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(12.dp)) {
-                OutlinedTextField(
-                    value = textInput,
-                    onValueChange = { textInput = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Escribí algo...", color = Color.Gray) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan)
-                )
-                IconButton(
-                    onClick = { if (textInput.isNotBlank()) { manager.sendMessage(TeleoNearbyMessage(type = "text", message = textInput)); textInput = "" } }
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar", tint = CyberCyan)
+        AnimatedVisibility(visible = !itp) {
+            Box(modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp).background(if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red.copy(alpha = 0.2f); "laughing" -> CyberYellow.copy(alpha = 0.1f); else -> Color.Black.copy(alpha = 0.3f) } } else Color.Black.copy(alpha = 0.3f)).padding(12.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val ei = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
+                    if (manager.remoteWord.value.isNotBlank()) Text(text = ei + (if (useEmojis) TeleoUtils.decorate(manager.remoteWord.value) else manager.remoteWord.value), color = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; else -> Color.White } } else Color.White, fontSize = if (useEmotions && manager.remoteEmotion.value == "shouting") 60.sp else 48.sp, fontWeight = FontWeight.Black)
+                    if (manager.remoteSentence.value.isNotBlank()) Text(text = if (useEmojis) TeleoUtils.decorate(manager.remoteSentence.value) else manager.remoteSentence.value, color = if (useEmotions && manager.remoteEmotion.value == "whispering") Color.Gray else CyberTeal, fontSize = 16.sp, textAlign = TextAlign.Center)
                 }
             }
         }
+        LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), state = ls) { items(manager.messages) { m -> ChatMessageBubble(m, m.senderId == manager.myId, useEmojis, useEmotions) } }
+        Surface(modifier = Modifier.fillMaxWidth().imePadding(), color = Color.Black.copy(alpha = 0.5f)) { Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(value = ti, onValueChange = { ti = it }, modifier = Modifier.weight(1f), placeholder = { Text("Mensaje...", color = Color.Gray) }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(manager.myColor)), trailingIcon = { if (ti.isNotBlank()) IconButton(onClick = { manager.sendMessage(TeleoNearbyMessage(type = "text", message = ti)); ti = ""; fm.clearFocus() }) { Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color(manager.myColor)) } }) } }
     }
 }
 
 @Composable
-fun ChatMessageBubble(msg: TeleoNearbyMessage, isMe: Boolean, useEmojis: Boolean, useEmotions: Boolean, participantSeed: String) {
-    if (msg.type == "system") { Text(msg.message, color = Color.Gray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(8.dp), textAlign = TextAlign.Center); return }
-    val align = if (isMe) Alignment.End else Alignment.Start
-    val participantColor = TeleoChatStyle.colorForParticipant(participantSeed)
-    val color = if (useEmotions) {
-        when (msg.emotion) {
-            "shouting" -> participantColor.copy(alpha = if (isMe) 0.22f else 0.14f)
-            "laughing" -> participantColor.copy(alpha = if (isMe) 0.20f else 0.12f)
-            else -> participantColor.copy(alpha = if (isMe) 0.16f else 0.08f)
-        }
-    } else participantColor.copy(alpha = if (isMe) 0.16f else 0.08f)
-    val textColor = if (useEmotions) {
-        when (msg.emotion) {
-            "shouting" -> TeleoChatStyle.contentColorFor(participantColor)
-            "laughing" -> TeleoChatStyle.contentColorFor(participantColor)
-            "whispering" -> Color.Gray
-            else -> TeleoChatStyle.contentColorFor(participantColor)
-        }
-    } else TeleoChatStyle.contentColorFor(participantColor)
-    val text = if (useEmojis) TeleoEmojiMapper.decorate(msg.message) else msg.message
-    val prefix = if (useEmotions) { when(msg.emotion) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
+fun ChatMessageBubble(m: TeleoNearbyMessage, isMe: Boolean, ue: Boolean, uem: Boolean) {
+    if (m.type == "system") { Text(text = m.message, color = Color.Gray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(8.dp), textAlign = TextAlign.Center); return }
+    val align = if (isMe) Alignment.End else Alignment.Start; val pc = Color(m.senderColor)
+    val bc = if (uem) { when (m.emotion) { "shouting" -> Color.Red.copy(0.2f); "laughing" -> CyberYellow.copy(0.2f); else -> pc.copy(if (isMe) 0.2f else 0.1f) } } else pc.copy(if (isMe) 0.2f else 0.1f)
+    val tc = if (uem && m.emotion == "whispering") Color.Gray else if (bc.luminance() > 0.6f) Color.Black else Color.White
+    val txt = if (ue) TeleoUtils.decorate(m.message) else m.message; val pr = if (uem) { when(m.emotion) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = align) {
-        if (msg.senderName.isNotBlank()) Text(text = msg.senderName, color = participantColor.copy(alpha = 0.9f), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 2.dp))
-        Surface(color = color, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, participantColor.copy(alpha = if (isMe) 0.5f else 0.3f))) {
-            Text(text = prefix + text, color = textColor, fontSize = if (useEmotions && msg.emotion == "whispering") 15.sp else 18.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), fontStyle = if (useEmotions && msg.emotion == "whispering") FontStyle.Italic else FontStyle.Normal, fontWeight = if (useEmotions && msg.emotion == "shouting") FontWeight.Bold else FontWeight.Normal)
-        }
+        if (m.senderName.isNotBlank()) Text(text = m.senderName, color = pc.copy(alpha = 0.9f), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 2.dp))
+        Surface(modifier = Modifier, shape = RoundedCornerShape(12.dp), color = bc, border = BorderStroke(1.dp, pc.copy(if (isMe) 0.6f else 0.3f))) { Text(text = pr + txt, color = if (isMe && pc.luminance() < 0.4f) Color.White else tc, fontSize = if (uem && m.emotion == "whispering") 15.sp else 18.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), fontStyle = if (uem && m.emotion == "whispering") FontStyle.Italic else FontStyle.Normal, fontWeight = if (uem && m.emotion == "shouting") FontWeight.Bold else FontWeight.Normal) }
     }
 }
