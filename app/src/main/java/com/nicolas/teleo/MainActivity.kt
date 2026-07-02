@@ -49,10 +49,12 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -295,22 +297,55 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HomeScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, un: String, uc: Int, ua: Bitmap?, onNavigate: (Screen) -> Unit) {
     val act = LocalContext.current as? android.app.Activity
-    Column(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26)))).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { act?.finish() }, modifier = Modifier.size(48.dp).background(Color.Red.copy(alpha = 0.1f), CircleShape).border(1.dp, Color.Red.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Close, null, tint = Color.Red) }
-                Spacer(Modifier.width(16.dp))
-                Column { Text("TELEO", color = Color(uc), fontSize = 32.sp, fontWeight = FontWeight.Black); Text("Hola, $un", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.clickable { onNavigate(Screen.Profile) }) }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26))))) {
+        val compactHeader = maxWidth < 900.dp
+        val compactCards = maxWidth < 780.dp
+        Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (compactHeader) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { act?.finish() }, modifier = Modifier.size(48.dp).background(Color.Red.copy(alpha = 0.1f), CircleShape).border(1.dp, Color.Red.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Close, null, tint = Color.Red) }
+                            Spacer(Modifier.width(16.dp))
+                            Column { Text("TELEO", color = Color(uc), fontSize = 32.sp, fontWeight = FontWeight.Black); Text("Hola, $un", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.clickable { onNavigate(Screen.Profile) }) }
+                        }
+                        IconButton(onClick = { onNavigate(Screen.Profile) }, modifier = Modifier.size(56.dp).background(Color(uc).copy(alpha = 0.1f), CircleShape).border(1.dp, Color(uc).copy(alpha = 0.4f), CircleShape)) { if (ua != null) Image(ua.asImageBitmap(), null, Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop) else Icon(Icons.Default.AccountCircle, null, tint = Color(uc), modifier = Modifier.size(40.dp)) }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(uc).copy(alpha = 0.2f))) {
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            ConfigToggle("Emojis", ue.value) { ue.value = it }
+                            Spacer(Modifier.height(8.dp))
+                            ConfigToggle("Emociones", uem.value) { uem.value = it }
+                        }
+                    }
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { act?.finish() }, modifier = Modifier.size(48.dp).background(Color.Red.copy(alpha = 0.1f), CircleShape).border(1.dp, Color.Red.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Close, null, tint = Color.Red) }
+                        Spacer(Modifier.width(16.dp))
+                        Column { Text("TELEO", color = Color(uc), fontSize = 32.sp, fontWeight = FontWeight.Black); Text("Hola, $un", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.clickable { onNavigate(Screen.Profile) }) }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(uc).copy(alpha = 0.2f))) { Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { ConfigToggle("Emojis", ue.value) { ue.value = it }; Spacer(Modifier.width(20.dp)); ConfigToggle("Emociones", uem.value) { uem.value = it } } }
+                        Spacer(Modifier.width(16.dp)); IconButton(onClick = { onNavigate(Screen.Profile) }, modifier = Modifier.size(56.dp).background(Color(uc).copy(alpha = 0.1f), CircleShape).border(1.dp, Color(uc).copy(alpha = 0.4f), CircleShape)) { if (ua != null) Image(ua.asImageBitmap(), null, Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop) else Icon(Icons.Default.AccountCircle, null, tint = Color(uc), modifier = Modifier.size(40.dp)) }
+                    }
+                }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(uc).copy(alpha = 0.2f))) { Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { ConfigToggle("Emojis", ue.value) { ue.value = it }; Spacer(Modifier.width(20.dp)); ConfigToggle("Emociones", uem.value) { uem.value = it } } }
-                Spacer(Modifier.width(16.dp)); IconButton(onClick = { onNavigate(Screen.Profile) }, modifier = Modifier.size(56.dp).background(Color(uc).copy(alpha = 0.1f), CircleShape).border(1.dp, Color(uc).copy(alpha = 0.4f), CircleShape)) { if (ua != null) Image(ua.asImageBitmap(), null, Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop) else Icon(Icons.Default.AccountCircle, null, tint = Color(uc), modifier = Modifier.size(40.dp)) }
+            if (compactCards) {
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
+                    HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Escribir", d = "Pantalla completa.", i = Icons.Default.Keyboard, c = CyberTeal) { onNavigate(Screen.EscribirYMostrar) }
+                    HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Teleo Cerca", d = "Conexión local.", i = Icons.Default.Wifi, c = CyberCyan) { onNavigate(Screen.TeleoCercaEntry) }
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxSize().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    HomeCard(modifier = Modifier.weight(1f), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
+                    HomeCard(modifier = Modifier.weight(1f), t = "Escribir", d = "Pantalla completa.", i = Icons.Default.Keyboard, c = CyberTeal) { onNavigate(Screen.EscribirYMostrar) }
+                    HomeCard(modifier = Modifier.weight(1f), t = "Teleo Cerca", d = "Conexión local.", i = Icons.Default.Wifi, c = CyberCyan) { onNavigate(Screen.TeleoCercaEntry) }
+                }
             }
-        }
-        Row(modifier = Modifier.fillMaxSize().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            HomeCard(modifier = Modifier.weight(1f), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
-            HomeCard(modifier = Modifier.weight(1f), t = "Escribir", d = "Pantalla completa.", i = Icons.Default.Keyboard, c = CyberTeal) { onNavigate(Screen.EscribirYMostrar) }
-            HomeCard(modifier = Modifier.weight(1f), t = "Teleo Cerca", d = "Conexión local.", i = Icons.Default.Wifi, c = CyberCyan) { onNavigate(Screen.TeleoCercaEntry) }
         }
     }
 }
@@ -331,7 +366,8 @@ fun HomeCard(modifier: Modifier, t: String, d: String, i: ImageVector, c: Color,
 @Composable
 fun ProfileScreen(cn: String, cc: Int, ca: Bitmap?, onSave: (String, Int) -> Unit, onTakeAvatar: () -> Unit, onBack: () -> Unit) {
     var n by remember { mutableStateOf(cn) }; var c by remember { mutableStateOf(cc) }
-    Column(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26)))).padding(32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26))))) {
+    Column(modifier = Modifier.fillMaxSize().padding(32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("PERFIL", color = Color(c), fontSize = 24.sp, fontWeight = FontWeight.Black); Spacer(Modifier.size(48.dp)) }
         Spacer(Modifier.height(24.dp))
         Box(modifier = Modifier.size(140.dp).clickable { onTakeAvatar() }, contentAlignment = Alignment.Center) {
@@ -339,12 +375,13 @@ fun ProfileScreen(cn: String, cc: Int, ca: Bitmap?, onSave: (String, Int) -> Uni
             else Box(modifier = Modifier.fillMaxSize().background(Color(c).copy(alpha = 0.1f), CircleShape).border(2.dp, Color(c), CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Default.AddAPhoto, null, modifier = Modifier.size(60.dp), tint = Color(c)) }
             Surface(modifier = Modifier.align(Alignment.BottomEnd).size(40.dp), shape = CircleShape, color = Color.DarkGray) { Icon(Icons.Default.Edit, null, modifier = Modifier.padding(8.dp), tint = Color.White) }
         }
-        Spacer(Modifier.height(32.dp)); Text("NICKNAME", color = Color.Gray, fontSize = 12.sp); OutlinedTextField(n, { n = it }, modifier = Modifier.width(300.dp), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(c)))
+        Spacer(Modifier.height(32.dp)); Text("NICKNAME", color = Color.Gray, fontSize = 12.sp); OutlinedTextField(n, { n = it }, modifier = Modifier.fillMaxWidth(0.8f).widthIn(max = 360.dp), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(c)))
         Spacer(Modifier.height(32.dp)); Text("COLOR", color = Color.Gray, fontSize = 12.sp)
-        LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.height(110.dp).width(240.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.height(110.dp).fillMaxWidth(0.75f).widthIn(max = 280.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(ColorPalette) { color -> Box(modifier = Modifier.size(45.dp).background(color, CircleShape).border(if (c == color.value.toLong().toInt()) 3.dp else 0.dp, Color.White, CircleShape).clickable { c = color.value.toLong().toInt() }) }
         }
         Spacer(Modifier.height(48.dp)); Button(onClick = { if (n.isNotBlank()) onSave(n, c) }, modifier = Modifier.height(56.dp).width(200.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(c), contentColor = CyberDark)) { Icon(Icons.Default.Save, null); Text("GUARDAR", fontWeight = FontWeight.Black) }
+    }
     }
 }
 
@@ -365,17 +402,21 @@ fun AvatarCameraScreen(onCaptured: (Bitmap) -> Unit, onBack: () -> Unit) {
 @Composable
 fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<String>, isl: MutableState<Boolean>, ipf: MutableState<Boolean>, hp: MutableState<Boolean>, ce: MutableState<String>, ue: Boolean, uem: Boolean, onStart: () -> Unit, onPause: () -> Unit, onClear: () -> Unit, onRequestPermission: () -> Unit, onBack: () -> Unit) {
     var aw by remember { mutableStateOf("") }; val fs = when { (cs.value.length + sh.sumOf { it.length }) < 50 -> 60.sp; (cs.value.length + sh.sumOf { it.length }) < 120 -> 45.sp; else -> 32.sp }
+    val configuration = LocalConfiguration.current
+    val compactScreen = configuration.screenWidthDp < 800 || configuration.screenHeightDp < 480
+    val liveWordSize = if (compactScreen) 110.sp else 160.sp
+    val currentSentenceSize = if (compactScreen) 32.sp else 42.sp
+    val shoutingSentenceSize = if (compactScreen) 40.sp else 56.sp
     LaunchedEffect(wq.size, ipf.value) { if (ipf.value) { aw = ""; wq.clear() } else if (wq.isNotEmpty()) { while (wq.isNotEmpty()) { aw = wq.removeAt(0); delay(350) }; delay(350); aw = "" } }
     Box(modifier = Modifier.fillMaxSize().background(CyberDark)) {
         val ei = if (uem) { when(ce.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 88.dp),
+                .padding(horizontal = 24.dp, vertical = if (compactScreen) 72.dp else 88.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -387,10 +428,12 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
                         Text(
                             text = if (ue) TeleoUtils.decorate(t) else t,
                             color = Color.White,
-                            fontSize = 160.sp,
+                            fontSize = liveWordSize,
                             fontWeight = FontWeight.Black,
                             fontStyle = FontStyle.Italic,
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -420,8 +463,8 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
                                     else -> if (aw.isNotBlank()) CyberMagenta.copy(alpha = 0.32f) else CyberMagenta
                                 }
                             } else CyberMagenta,
-                            fontSize = if (uem && ce.value == "shouting") 56.sp else 42.sp,
-                            lineHeight = if (uem && ce.value == "shouting") 64.sp else 50.sp,
+                            fontSize = if (uem && ce.value == "shouting") shoutingSentenceSize else currentSentenceSize,
+                            lineHeight = if (uem && ce.value == "shouting") shoutingSentenceSize.value.sp * 1.15f else currentSentenceSize.value.sp * 1.2f,
                             fontWeight = FontWeight.ExtraBold,
                             textAlign = TextAlign.Center,
                             maxLines = 4,
@@ -442,32 +485,101 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
             }
         }
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { Box(modifier = Modifier.size(8.dp).background(if (isl.value) CyberTeal else Color.Red, CircleShape)); Text(text = if (isl.value) "ONLINE" else "OFFLINE", color = if (isl.value) CyberTeal else Color.Red, fontSize = 10.sp) } }
-        Surface(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = Color.Transparent) { Row(modifier = Modifier.padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterHorizontally)) { if (!hp.value) TextButton(onClick = onRequestPermission) { Text("PEDIR PERMISO", color = Color.Red) } else { TextButton(onClick = onStart, enabled = !isl.value) { Text("HABLAR", color = if (!isl.value) CyberCyan else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onPause, enabled = isl.value) { Text("PAUSA", color = if (isl.value) CyberMagenta else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onClear) { Text("RESET", color = CyberYellow) } } } }
+        Surface(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = Color.Transparent) {
+            if (!hp.value) {
+                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.Center) { TextButton(onClick = onRequestPermission) { Text("PEDIR PERMISO", color = Color.Red) } }
+            } else if (compactScreen) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = onStart, enabled = !isl.value) { Text("HABLAR", color = if (!isl.value) CyberCyan else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }
+                    TextButton(onClick = onPause, enabled = isl.value) { Text("PAUSA", color = if (isl.value) CyberMagenta else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }
+                    TextButton(onClick = onClear) { Text("RESET", color = CyberYellow) }
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterHorizontally)) { TextButton(onClick = onStart, enabled = !isl.value) { Text("HABLAR", color = if (!isl.value) CyberCyan else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onPause, enabled = isl.value) { Text("PAUSA", color = if (isl.value) CyberMagenta else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onClear) { Text("RESET", color = CyberYellow) } }
+            }
+        }
     }
 }
 
 @Composable
 fun WriteAndShowScreen(ue: Boolean, onBackAction: () -> Unit) {
     var t by remember { mutableStateOf("") }; var s by remember { mutableStateOf(false) }; var f by remember { mutableStateOf(48f) }
-    if (s) Box(modifier = Modifier.fillMaxSize().background(Color.Black)) { Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text(text = if (ue) TeleoUtils.decorate(t) else t, color = Color.White, fontSize = f.sp, textAlign = TextAlign.Center) }; Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) { IconButton(onClick = { f -= 8f }, modifier = Modifier.size(48.dp).border(1.dp, CyberCyan, CircleShape)) { Text("A-", color = CyberCyan) }; IconButton(onClick = { f += 8f }, modifier = Modifier.size(48.dp).border(1.dp, CyberCyan, CircleShape)) { Text("A+", color = CyberCyan) } }; Row(modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) { TextButton(onClick = { s = false }) { Text("EDITAR", color = CyberCyan) }; TextButton(onClick = { t = ""; s = false }) { Text("LIMPIAR", color = CyberYellow) } } }
-    else Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) { Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBackAction, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Text("ESCRIBIR", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.size(48.dp)) }; OutlinedTextField(value = t, onValueChange = { t = it }, modifier = Modifier.fillMaxWidth().weight(1f), label = { Text("Mensaje...") }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan)); Row(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) { Button(onClick = { t = "" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) { Text("LIMPIAR") }; Button(onClick = { if (t.isNotBlank()) s = true }, modifier = Modifier.weight(1.5f), colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("MOSTRAR", fontWeight = FontWeight.Bold) } } }
+    val configuration = LocalConfiguration.current
+    val compactScreen = configuration.screenWidthDp < 800 || configuration.screenHeightDp < 480
+    if (s) {
+        Column(modifier = Modifier.fillMaxSize().background(Color.Black).padding(horizontal = 24.dp, vertical = 16.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    IconButton(onClick = { f = maxOf(24f, f - 8f) }, modifier = Modifier.size(48.dp).border(1.dp, CyberCyan, CircleShape)) { Text("A-", color = CyberCyan) }
+                    IconButton(onClick = { f = minOf(120f, f + 8f) }, modifier = Modifier.size(48.dp).border(1.dp, CyberCyan, CircleShape)) { Text("A+", color = CyberCyan) }
+                }
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 16.dp).verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
+                Text(text = if (ue) TeleoUtils.decorate(t) else t, color = Color.White, fontSize = f.sp, textAlign = TextAlign.Center)
+            }
+            if (compactScreen) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    TextButton(onClick = { s = false }) { Text("EDITAR", color = CyberCyan) }
+                    TextButton(onClick = { t = ""; s = false }) { Text("LIMPIAR", color = CyberYellow) }
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
+                    TextButton(onClick = { s = false }) { Text("EDITAR", color = CyberCyan) }
+                    Spacer(modifier = Modifier.width(24.dp))
+                    TextButton(onClick = { t = ""; s = false }) { Text("LIMPIAR", color = CyberYellow) }
+                }
+            }
+        }
+    } else Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) { Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBackAction, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Text("ESCRIBIR", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.size(48.dp)) }; OutlinedTextField(value = t, onValueChange = { t = it }, modifier = Modifier.fillMaxWidth().weight(1f), label = { Text("Mensaje...") }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = CyberCyan)); if (compactScreen) { Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Button(onClick = { t = "" }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) { Text("LIMPIAR") }; Button(onClick = { if (t.isNotBlank()) s = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("MOSTRAR", fontWeight = FontWeight.Bold) } } } else { Row(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) { Button(onClick = { t = "" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) { Text("LIMPIAR") }; Button(onClick = { if (t.isNotBlank()) s = true }, modifier = Modifier.weight(1.5f), colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("MOSTRAR", fontWeight = FontWeight.Bold) } } } }
 }
 
 @Composable
 fun TeleoNearbyEntryScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, onNavigate: (Screen) -> Unit, onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Text("TELEO CERCA", color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black); Surface(modifier = Modifier.padding(vertical = 4.dp), shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.05f)) { Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { ConfigToggle("Emojis", ue.value) { ue.value = it } } } }; Spacer(modifier = Modifier.height(32.dp)); Row(modifier = Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) { HomeCard(modifier = Modifier.weight(1f), t = "Crear Charla", d = "Modo Host.", i = Icons.Default.Add, c = CyberCyan) { onNavigate(Screen.TeleoCercaCreate) }; HomeCard(modifier = Modifier.weight(1f), t = "Unirme", d = "Buscar Host.", i = Icons.Default.Search, c = CyberTeal) { onNavigate(Screen.TeleoCercaJoin) } } }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+        val compactScreen = maxWidth < 780.dp
+        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            if (compactScreen) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Text("TELEO CERCA", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Black); Spacer(modifier = Modifier.size(48.dp)) }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Surface(modifier = Modifier.padding(vertical = 4.dp), shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.05f)) { Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { ConfigToggle("Emojis", ue.value) { ue.value = it } } }
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Text("TELEO CERCA", color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black); Surface(modifier = Modifier.padding(vertical = 4.dp), shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.05f)) { Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { ConfigToggle("Emojis", ue.value) { ue.value = it } } } }
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+            if (compactScreen) {
+                Column(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Crear Charla", d = "Modo Host.", i = Icons.Default.Add, c = CyberCyan) { onNavigate(Screen.TeleoCercaCreate) }
+                    HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Unirme", d = "Buscar Host.", i = Icons.Default.Search, c = CyberTeal) { onNavigate(Screen.TeleoCercaJoin) }
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) { HomeCard(modifier = Modifier.weight(1f), t = "Crear Charla", d = "Modo Host.", i = Icons.Default.Add, c = CyberCyan) { onNavigate(Screen.TeleoCercaCreate) }; HomeCard(modifier = Modifier.weight(1f), t = "Unirme", d = "Buscar Host.", i = Icons.Default.Search, c = CyberTeal) { onNavigate(Screen.TeleoCercaJoin) } }
+            }
+        }
+    }
 }
 
 @Composable
 fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> Unit, onBack: () -> Unit) {
     val qrb = remember { TeleoUtils.generateQR(manager.myName) }
     LaunchedEffect(Unit) { manager.startAdvertising() }
-    Column(modifier = Modifier.fillMaxSize().background(CyberDark).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(CyberDark)) {
+        val compactScreen = maxWidth < 900.dp
+        Column(modifier = Modifier.fillMaxSize().padding(32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) } ; Text("HOST: CREAR CHARLA", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.size(48.dp)) }
         Spacer(modifier = Modifier.height(32.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp)) {
-            Surface(modifier = Modifier.size(240.dp).padding(8.dp), shape = RoundedCornerShape(16.dp), color = Color.White) { qrb?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "QR", modifier = Modifier.fillMaxSize()) } }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ID DISPOSITIVO", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black); Spacer(modifier = Modifier.height(24.dp)); CircularProgressIndicator(color = CyberCyan); Spacer(modifier = Modifier.height(16.dp)); Text(text = "Esperando solicitudes...", color = Color.White.copy(alpha = 0.6f)) }
+        if (compactScreen) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(modifier = Modifier.fillMaxWidth(0.6f).aspectRatio(1f).padding(8.dp), shape = RoundedCornerShape(16.dp), color = Color.White) { qrb?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "QR", modifier = Modifier.fillMaxSize()) } }
+                Spacer(modifier = Modifier.height(24.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ID DISPOSITIVO", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 26.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(24.dp)); CircularProgressIndicator(color = CyberCyan); Spacer(modifier = Modifier.height(16.dp)); Text(text = "Esperando solicitudes...", color = Color.White.copy(alpha = 0.6f), textAlign = TextAlign.Center) }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp)) {
+                Surface(modifier = Modifier.size(240.dp).padding(8.dp), shape = RoundedCornerShape(16.dp), color = Color.White) { qrb?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "QR", modifier = Modifier.fillMaxSize()) } }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ID DISPOSITIVO", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(24.dp)); CircularProgressIndicator(color = CyberCyan); Spacer(modifier = Modifier.height(16.dp)); Text(text = "Esperando solicitudes...", color = Color.White.copy(alpha = 0.6f), textAlign = TextAlign.Center) }
+            }
         }
         if (manager.pendingRequests.isNotEmpty()) {
             Spacer(modifier = Modifier.height(32.dp))
@@ -475,8 +587,9 @@ fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> 
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(text = "SOLICITUDES", color = CyberCyan, fontWeight = FontWeight.Bold)
                     manager.pendingRequests.forEach { p ->
-                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = p.name, color = Color.White); Row { TextButton(onClick = { manager.reject(p) }) { Text("RECHAZAR", color = Color.Red) }; Button(onClick = { manager.accept(p) }, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("ACEPTAR") } }
+                        Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            Text(text = p.name, color = Color.White)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = { manager.reject(p) }) { Text("RECHAZAR", color = Color.Red) }; Button(onClick = { manager.accept(p) }, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark)) { Text("ACEPTAR") } }
                         }
                     }
                 }
@@ -484,17 +597,29 @@ fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> 
         }
         if (manager.connectedParticipants.isNotEmpty()) LaunchedEffect(Unit) { onConnected() }
     }
+    }
 }
 
 @Composable
 fun JoinNearbyChatScreen(manager: NearbyConnectionManager, onScan: () -> Unit, onConnected: () -> Unit, onBack: () -> Unit) {
     LaunchedEffect(Unit) { manager.startDiscovery() }
     if (manager.connectedParticipants.isNotEmpty()) LaunchedEffect(Unit) { onConnected() }
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("UNIRSE", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.QrCodeScanner, null); Spacer(modifier = Modifier.width(8.dp)); Text("ESCANEAR") } }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+        val compactScreen = maxWidth < 780.dp
+        Column(modifier = Modifier.fillMaxSize()) {
+        if (compactScreen) {
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("UNIRSE", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.size(48.dp)) }
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.QrCodeScanner, null); Spacer(modifier = Modifier.width(8.dp)); Text("ESCANEAR") }
+            }
+        } else {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("UNIRSE", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.QrCodeScanner, null); Spacer(modifier = Modifier.width(8.dp)); Text("ESCANEAR") } }
+        }
         Spacer(modifier = Modifier.height(16.dp))
         if (manager.discoveredEndpoints.isEmpty()) Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { CircularProgressIndicator(color = CyberCyan.copy(alpha = 0.3f)); Text(text = "Buscando...", color = Color.Gray) } }
         else LazyColumn(modifier = Modifier.weight(1f)) { items(manager.discoveredEndpoints) { e -> Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable { manager.requestConnection(e) }, colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f))) { Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Text(e.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.weight(1f)); Text("SOLICITAR >", color = CyberCyan, fontSize = 14.sp) } } } }
+    }
     }
 }
 
@@ -512,6 +637,8 @@ fun QRScannerScreen(onScanResult: (String) -> Unit, onBack: () -> Unit) {
 @Composable
 fun NearbyChatScreen(manager: NearbyConnectionManager, isListening: MutableState<Boolean>, useEmojis: Boolean, useEmotions: Boolean, onSV: () -> Unit, onPV: () -> Unit, onB: () -> Unit) {
     var ti by remember { mutableStateOf("") }; val ls = rememberLazyListState(); val fm = LocalFocusManager.current; val itp = ti.isNotEmpty(); var sp by remember { mutableStateOf(false) }
+    val configuration = LocalConfiguration.current
+    val compactScreen = configuration.screenWidthDp < 800 || configuration.screenHeightDp < 480
     LaunchedEffect(manager.messages.size) { if (manager.messages.isNotEmpty()) ls.animateScrollToItem(manager.messages.size - 1) }
     Column(modifier = Modifier.fillMaxSize().background(CyberDark)) {
         AnimatedVisibility(visible = !itp) {
@@ -536,8 +663,8 @@ fun NearbyChatScreen(manager: NearbyConnectionManager, isListening: MutableState
             Box(modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp).background(if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red.copy(alpha = 0.2f); "laughing" -> CyberYellow.copy(alpha = 0.1f); else -> Color.Black.copy(alpha = 0.3f) } } else Color.Black.copy(alpha = 0.3f)).padding(12.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     val ei = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
-                    if (manager.remoteWord.value.isNotBlank()) Text(text = ei + (if (useEmojis) TeleoUtils.decorate(manager.remoteWord.value) else manager.remoteWord.value), color = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; else -> Color.White } } else Color.White, fontSize = if (useEmotions && manager.remoteEmotion.value == "shouting") 60.sp else 48.sp, fontWeight = FontWeight.Black)
-                    if (manager.remoteSentence.value.isNotBlank()) Text(text = if (useEmojis) TeleoUtils.decorate(manager.remoteSentence.value) else manager.remoteSentence.value, color = if (useEmotions && manager.remoteEmotion.value == "whispering") Color.Gray else CyberTeal, fontSize = 16.sp, textAlign = TextAlign.Center)
+                    if (manager.remoteWord.value.isNotBlank()) Text(text = ei + (if (useEmojis) TeleoUtils.decorate(manager.remoteWord.value) else manager.remoteWord.value), color = if (useEmotions) { when(manager.remoteEmotion.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; else -> Color.White } } else Color.White, fontSize = if (useEmotions && manager.remoteEmotion.value == "shouting") if (compactScreen) 42.sp else 60.sp else if (compactScreen) 36.sp else 48.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (manager.remoteSentence.value.isNotBlank()) Text(text = if (useEmojis) TeleoUtils.decorate(manager.remoteSentence.value) else manager.remoteSentence.value, color = if (useEmotions && manager.remoteEmotion.value == "whispering") Color.Gray else CyberTeal, fontSize = 16.sp, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
