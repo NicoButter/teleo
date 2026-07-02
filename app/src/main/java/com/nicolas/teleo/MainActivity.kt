@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -318,12 +319,80 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
     var aw by remember { mutableStateOf("") }; val fs = when { (cs.value.length + sh.sumOf { it.length }) < 50 -> 60.sp; (cs.value.length + sh.sumOf { it.length }) < 120 -> 45.sp; else -> 32.sp }
     LaunchedEffect(wq.size, ipf.value) { if (ipf.value) { aw = ""; wq.clear() } else if (wq.isNotEmpty()) { while (wq.isNotEmpty()) { aw = wq.removeAt(0); delay(350) }; delay(350); aw = "" } }
     Box(modifier = Modifier.fillMaxSize().background(CyberDark)) {
-        Column(modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(modifier = Modifier.height(40.dp)); val ei = if (uem) { when(ce.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
-            if (cs.value.isNotBlank()) Text(ei + (if (ue) TeleoUtils.decorate(cs.value) else cs.value), color = if (uem) { when(ce.value) { "shouting" -> Color.Red; "laughing" -> CyberYellow; "whispering" -> Color.Gray; else -> if (aw.isNotBlank()) CyberMagenta.copy(alpha = 0.25f) else CyberMagenta } } else CyberMagenta, fontSize = if (uem && ce.value == "shouting") 60.sp else 48.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
-            sh.forEach { Text(text = if (ue) TeleoUtils.decorate(it) else it, color = if (aw.isNotBlank()) CyberCyan.copy(alpha = 0.15f) else CyberCyan, fontSize = fs, fontWeight = FontWeight.Black, textAlign = TextAlign.Center) }
+        val ei = if (uem) { when(ce.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 88.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                if (aw.isNotBlank()) {
+                    AnimatedContent(aw, transitionSpec = { (fadeIn(tween(150)) + scaleIn()) togetherWith fadeOut(tween(100)) }, label = "") { t ->
+                        Text(
+                            text = if (ue) TeleoUtils.decorate(t) else t,
+                            color = Color.White,
+                            fontSize = 160.sp,
+                            fontWeight = FontWeight.Black,
+                            fontStyle = FontStyle.Italic,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White.copy(alpha = 0.04f),
+                shape = RoundedCornerShape(24.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (cs.value.isNotBlank()) {
+                        Text(
+                            text = ei + (if (ue) TeleoUtils.decorate(cs.value) else cs.value),
+                            color = if (uem) {
+                                when (ce.value) {
+                                    "shouting" -> Color.Red
+                                    "laughing" -> CyberYellow
+                                    "whispering" -> Color.Gray
+                                    else -> if (aw.isNotBlank()) CyberMagenta.copy(alpha = 0.32f) else CyberMagenta
+                                }
+                            } else CyberMagenta,
+                            fontSize = if (uem && ce.value == "shouting") 56.sp else 42.sp,
+                            lineHeight = if (uem && ce.value == "shouting") 64.sp else 50.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    sh.forEach {
+                        Text(
+                            text = if (ue) TeleoUtils.decorate(it) else it,
+                            color = if (aw.isNotBlank()) CyberCyan.copy(alpha = 0.22f) else CyberCyan,
+                            fontSize = fs,
+                            lineHeight = fs.value.sp * 1.2f,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
         }
-        if (aw.isNotBlank()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { AnimatedContent(aw, transitionSpec = { (fadeIn(tween(150)) + scaleIn()) togetherWith fadeOut(tween(100)) }, label = "") { t -> Text(text = if (ue) TeleoUtils.decorate(t) else t, color = Color.White, fontSize = 160.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic) } }
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.05f), CircleShape).border(1.dp, Color.Gray.copy(alpha = 0.4f), CircleShape)) { Icon(Icons.Default.Home, null, tint = Color.White) }; Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { Box(modifier = Modifier.size(8.dp).background(if (isl.value) CyberTeal else Color.Red, CircleShape)); Text(text = if (isl.value) "ONLINE" else "OFFLINE", color = if (isl.value) CyberTeal else Color.Red, fontSize = 10.sp) } }
         Surface(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = Color.Transparent) { Row(modifier = Modifier.padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterHorizontally)) { if (!hp.value) TextButton(onClick = onRequestPermission) { Text("PEDIR PERMISO", color = Color.Red) } else { TextButton(onClick = onStart, enabled = !isl.value) { Text("HABLAR", color = if (!isl.value) CyberCyan else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onPause, enabled = isl.value) { Text("PAUSA", color = if (isl.value) CyberMagenta else Color.Gray, fontSize = 20.sp, fontWeight = FontWeight.Black) }; TextButton(onClick = onClear) { Text("RESET", color = CyberYellow) } } } }
     }
