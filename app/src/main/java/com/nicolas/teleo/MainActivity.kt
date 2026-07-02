@@ -24,6 +24,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -272,7 +274,7 @@ class MainActivity : ComponentActivity() {
 
     private fun checkNearbyPermissions(): Boolean { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); return p.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED } }
     private fun requestPermission() { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); ActivityCompat.requestPermissions(this, p.toTypedArray(), 1001) }
-    private fun initSpeechRecognizer() { speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this); recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM); putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true) }; speechRecognizer.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { isProcessingFinal.value = false }; override fun onBeginningOfSpeech() {}; override fun onRmsChanged(r: Float) { lastRms.value = r; if (isListening.value) currentEmotion.value = determineEmotion(currentSentence.value) }; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() {}; override fun onError(e: Int) { if (isListening.value && (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 500) else if (e != SpeechRecognizer.ERROR_CLIENT) isListening.value = false }; override fun onPartialResults(pr: Bundle?) { pr?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { t -> currentEmotion.value = determineEmotion(t); processLiveText(t); if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "partial", emotion = currentEmotion.value, currentWord = t.split("\\s+").lastOrNull() ?: "", currentSentence = t)) } }; override fun onResults(r: Bundle?) { isProcessingFinal.value = true; r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { f -> if (f.isNotBlank()) { if (currentScreen.value == Screen.PalabraViva) { sentenceHistory.clear(); sentenceHistory.add(f) } else if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "final", emotion = determineEmotion(f), message = f)) } }; currentSentence.value = ""; wordQueue.clear(); currentEmotion.value = "normal"; if (isListening.value) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 400) }; override fun onEvent(ev: Int, p: Bundle?) {} }) }
+    private fun initSpeechRecognizer() { speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this); recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM); putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true) }; speechRecognizer.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { isProcessingFinal.value = false }; override fun onBeginningOfSpeech() { if (currentScreen.value == Screen.PalabraViva) { sentenceHistory.clear(); currentSentence.value = ""; wordQueue.clear() } }; override fun onRmsChanged(r: Float) { lastRms.value = r; if (isListening.value) currentEmotion.value = determineEmotion(currentSentence.value) }; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() {}; override fun onError(e: Int) { if (isListening.value && (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 500) else if (e != SpeechRecognizer.ERROR_CLIENT) isListening.value = false }; override fun onPartialResults(pr: Bundle?) { pr?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { t -> currentEmotion.value = determineEmotion(t); processLiveText(t); if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "partial", emotion = currentEmotion.value, currentWord = t.split("\\s+").lastOrNull() ?: "", currentSentence = t)) } }; override fun onResults(r: Bundle?) { isProcessingFinal.value = true; r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { f -> if (f.isNotBlank()) { if (currentScreen.value == Screen.PalabraViva) { sentenceHistory.clear(); sentenceHistory.add(f) } else if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "final", emotion = determineEmotion(f), message = f)) } }; currentSentence.value = ""; wordQueue.clear(); currentEmotion.value = "normal"; if (isListening.value) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 400) }; override fun onEvent(ev: Int, p: Bundle?) {} }) }
     private fun processLiveText(t: String) { if (isProcessingFinal.value || t == currentSentence.value) return; val old = currentSentence.value.trim().split("\\s+").filter { it.isNotBlank() }.size; val new = t.trim().split("\\s+").filter { it.isNotBlank() }.size; currentSentence.value = t; if (new > old) for (i in old until new) wordQueue.add(t.trim().split("\\s+").filter { it.isNotBlank() }[i]) }
     private fun determineEmotion(t: String): String { if (!useEmotions.value) return "normal"; val u = t.uppercase(); return when { u.contains("JAJA") || u.contains("HAHA") -> "laughing"; lastRms.value > 10f -> "shouting"; lastRms.value < 1.5f && lastRms.value > -2f -> "whispering"; else -> "normal" } }
     private fun configureAudioForSpeech() {
@@ -462,7 +464,24 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
                 TextButton(onClick = onRequestPermission, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("PERMISO", color = Color.Red.copy(alpha = 0.75f), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compactScreen) 2.dp else 6.dp)) {
-                    IconButton(onClick = onStart, enabled = !isl.value, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Mic, "Hablar", tint = if (!isl.value) CyberCyan.copy(alpha = 0.75f) else Color.White.copy(alpha = 0.24f), modifier = Modifier.size(20.dp)) }
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (isl.value) CyberCyan.copy(alpha = 0.14f) else Color.Transparent)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onPress = {
+                                        if (!isl.value) onStart()
+                                        tryAwaitRelease()
+                                        onPause()
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Mic, "Mantener presionado para hablar", tint = if (isl.value) CyberTeal else CyberCyan.copy(alpha = 0.75f), modifier = Modifier.size(20.dp))
+                    }
                     IconButton(onClick = onPause, enabled = isl.value, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Pause, "Pausa", tint = if (isl.value) CyberMagenta.copy(alpha = 0.75f) else Color.White.copy(alpha = 0.24f), modifier = Modifier.size(20.dp)) }
                     IconButton(onClick = onClear, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.RestartAlt, "Reset", tint = CyberYellow.copy(alpha = 0.7f), modifier = Modifier.size(20.dp)) }
                 }
