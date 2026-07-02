@@ -15,6 +15,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Base64
 import android.util.Log
+import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -67,6 +68,9 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.nicolas.teleo.ui.theme.TeleoTheme
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -209,7 +213,7 @@ class MainActivity : ComponentActivity() {
     private val useEmojis = mutableStateOf(true); private val useEmotions = mutableStateOf(true); private val userName = mutableStateOf(""); private val userColor = mutableStateOf(0xFF00E5FF.toInt()); private val userAvatar = mutableStateOf<Bitmap?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); hideSystemBars()
         val prefs = getSharedPreferences("teleo_prefs", Context.MODE_PRIVATE)
         userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL; userColor.value = prefs.getInt("user_color", 0xFF00E5FF.toInt())
         prefs.getString("user_avatar", null)?.let { userAvatar.value = TeleoUtils.fromB64(it) }
@@ -229,6 +233,34 @@ class MainActivity : ComponentActivity() {
                 Screen.TeleoCercaChat -> NearbyChatScreen(nearbyManager, isListening, useEmojis.value, useEmotions.value, onSV = { startListening() }, onPV = { pauseListening() }, onB = { nearbyManager.disconnect(); currentScreen.value = Screen.Home })
             }
         } } }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemBars()
+    }
+
+    private fun hideSystemBars() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        @Suppress("DEPRECATION")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        }
     }
 
     private fun checkNearbyPermissions(): Boolean { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); return p.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED } }
