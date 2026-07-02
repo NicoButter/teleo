@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -207,14 +208,18 @@ object TeleoUtils {
 
 class MainActivity : ComponentActivity() {
     private lateinit var speechRecognizer: SpeechRecognizer; private lateinit var recognizerIntent: Intent; private lateinit var nearbyManager: NearbyConnectionManager
+    private lateinit var audioManager: AudioManager
     private val currentSentence = mutableStateOf(""); private val wordQueue = mutableStateListOf<String>(); private val sentenceHistory = mutableStateListOf<String>()
     private val isListening = mutableStateOf(false); private val isProcessingFinal = mutableStateOf(false); private val hasRecordPermission = mutableStateOf(false)
     private val lastRms = mutableStateOf(0f); private val currentEmotion = mutableStateOf("normal"); private val currentScreen = mutableStateOf(Screen.Home)
     private val useEmojis = mutableStateOf(true); private val useEmotions = mutableStateOf(true); private val userName = mutableStateOf(""); private val userColor = mutableStateOf(0xFF00E5FF.toInt()); private val userAvatar = mutableStateOf<Bitmap?>(null)
+    private var previousAudioMode = AudioManager.MODE_NORMAL
+    private var isSpeechAudioConfigured = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); hideSystemBars()
         val prefs = getSharedPreferences("teleo_prefs", Context.MODE_PRIVATE)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL; userColor.value = prefs.getInt("user_color", 0xFF00E5FF.toInt())
         prefs.getString("user_avatar", null)?.let { userAvatar.value = TeleoUtils.fromB64(it) }
         nearbyManager = NearbyConnectionManager(this).apply { myName = userName.value; myColor = userColor.value }
@@ -268,10 +273,21 @@ class MainActivity : ComponentActivity() {
     private fun initSpeechRecognizer() { speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this); recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM); putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true) }; speechRecognizer.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { isProcessingFinal.value = false }; override fun onBeginningOfSpeech() {}; override fun onRmsChanged(r: Float) { lastRms.value = r; if (isListening.value) currentEmotion.value = determineEmotion(currentSentence.value) }; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() {}; override fun onError(e: Int) { if (isListening.value && (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 500) else if (e != SpeechRecognizer.ERROR_CLIENT) isListening.value = false }; override fun onPartialResults(pr: Bundle?) { pr?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { t -> currentEmotion.value = determineEmotion(t); processLiveText(t); if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "partial", emotion = currentEmotion.value, currentWord = t.split("\\s+").lastOrNull() ?: "", currentSentence = t)) } }; override fun onResults(r: Bundle?) { isProcessingFinal.value = true; r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { f -> if (f.isNotBlank()) { if (currentScreen.value == Screen.PalabraViva) { sentenceHistory.clear(); sentenceHistory.add(f) } else if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "final", emotion = determineEmotion(f), message = f)) } }; currentSentence.value = ""; wordQueue.clear(); currentEmotion.value = "normal"; if (isListening.value) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 400) }; override fun onEvent(ev: Int, p: Bundle?) {} }) }
     private fun processLiveText(t: String) { if (isProcessingFinal.value || t == currentSentence.value) return; val old = currentSentence.value.trim().split("\\s+").filter { it.isNotBlank() }.size; val new = t.trim().split("\\s+").filter { it.isNotBlank() }.size; currentSentence.value = t; if (new > old) for (i in old until new) wordQueue.add(t.trim().split("\\s+").filter { it.isNotBlank() }[i]) }
     private fun determineEmotion(t: String): String { if (!useEmotions.value) return "normal"; val u = t.uppercase(); return when { u.contains("JAJA") || u.contains("HAHA") -> "laughing"; lastRms.value > 10f -> "shouting"; lastRms.value < 1.5f && lastRms.value > -2f -> "whispering"; else -> "normal" } }
-    private fun startListening() { if (!checkNearbyPermissions()) { requestPermission(); return }; isListening.value = true; try { speechRecognizer.startListening(recognizerIntent) } catch (e: Exception) { isListening.value = false } }
-    private fun pauseListening() { try { speechRecognizer.stopListening() } catch (_: Exception) {}; isListening.value = false }
+    private fun configureAudioForSpeech() {
+        if (isSpeechAudioConfigured) return
+        previousAudioMode = audioManager.mode
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        isSpeechAudioConfigured = true
+    }
+    private fun restoreAudioMode() {
+        if (!isSpeechAudioConfigured) return
+        audioManager.mode = previousAudioMode
+        isSpeechAudioConfigured = false
+    }
+    private fun startListening() { if (!checkNearbyPermissions()) { requestPermission(); return }; configureAudioForSpeech(); isListening.value = true; try { speechRecognizer.startListening(recognizerIntent) } catch (e: Exception) { restoreAudioMode(); isListening.value = false } }
+    private fun pauseListening() { try { speechRecognizer.stopListening() } catch (_: Exception) {}; restoreAudioMode(); isListening.value = false }
     override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, gr: IntArray) { super.onRequestPermissionsResult(rc, p, gr); if (rc == 1001) hasRecordPermission.value = gr.isNotEmpty() && gr.all { it == PackageManager.PERMISSION_GRANTED } }
-    override fun onDestroy() { try { speechRecognizer.destroy() } catch (_: Exception) {}; nearbyManager.disconnect(); super.onDestroy() }
+    override fun onDestroy() { restoreAudioMode(); try { speechRecognizer.destroy() } catch (_: Exception) {}; nearbyManager.disconnect(); super.onDestroy() }
 }
 
 // --- COMPOSABLES ---
