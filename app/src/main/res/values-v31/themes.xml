@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Teleo" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/cyber_dark</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_transparent</item>
+        <item name="postSplashScreenTheme">@style/Theme.Teleo.App</item>
+    </style>
+
+    <style name="Theme.Teleo.App" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/cyber_dark</item>
+        <item name="android:navigationBarColor">@color/cyber_dark</item>
+        <item name="android:statusBarColor">@color/cyber_dark</item>
+    </style>
+</resources>

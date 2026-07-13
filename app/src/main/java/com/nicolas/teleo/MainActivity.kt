@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -319,6 +320,7 @@ class MainActivity : ComponentActivity() {
     private val showStartupSplash = mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); hideSystemBars()
         val prefs = getSharedPreferences("teleo_prefs", Context.MODE_PRIVATE)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -520,14 +522,15 @@ fun StartupSplashScreen() {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Image(
-                painter = painterResource(id = R.drawable.app_icon_new),
+                painter = painterResource(id = R.drawable.logo_teleo_transparent),
                 contentDescription = "Logo Teleo",
-                modifier = Modifier.size(142.dp),
+                modifier = Modifier
+                    .width(330.dp)
+                    .height(130.dp)
+                    .clip(RoundedCornerShape(24.dp)),
                 contentScale = ContentScale.Fit
             )
             Spacer(Modifier.height(28.dp))
-            Box(modifier = Modifier.width(210.dp).height(1.dp).background(CyberCyan.copy(alpha = 0.35f)))
-            Spacer(Modifier.height(22.dp))
             Image(
                 painter = painterResource(id = R.drawable.logo_vetrabyte),
                 contentDescription = "Vetrabyte Software Development",
@@ -535,8 +538,6 @@ fun StartupSplashScreen() {
                 contentScale = ContentScale.Fit,
                 alpha = 0.95f
             )
-            Spacer(Modifier.height(22.dp))
-            Text("SOFTWARE QUE CONECTA", color = Color.White.copy(alpha = 0.42f), fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
