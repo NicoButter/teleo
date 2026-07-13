@@ -799,10 +799,26 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
     val compactScreen = configuration.screenWidthDp < 800 || configuration.screenHeightDp < 480
     val livePhrase = cs.value.trim()
     val finalPhrase = sh.lastOrNull()?.trim().orEmpty()
-    val showFinalPhrase = finalPhrase.isNotBlank() && (ipf.value || livePhrase.isBlank())
-    val animatedWord = if (showFinalPhrase) "" else wq.lastOrNull().orEmpty()
-    val rawPhrase = if (showFinalPhrase) finalPhrase else animatedWord
-    val decoratedPhrase = if (ue) TeleoUtils.decorate(rawPhrase) else rawPhrase
+    var heldLivePhrase by remember { mutableStateOf("") }
+    var displayedFinalPhrase by remember { mutableStateOf("") }
+
+    LaunchedEffect(livePhrase) {
+        if (livePhrase.isNotBlank()) heldLivePhrase = livePhrase
+    }
+    LaunchedEffect(ipf.value, finalPhrase, livePhrase) {
+        when {
+            livePhrase.isNotBlank() -> displayedFinalPhrase = ""
+            ipf.value && finalPhrase.isNotBlank() -> {
+                // Deja respirar la última palabra antes de fundir la frase final.
+                delay(240)
+                displayedFinalPhrase = finalPhrase
+            }
+            finalPhrase.isBlank() -> displayedFinalPhrase = ""
+        }
+    }
+
+    val isStaticFinal = displayedFinalPhrase.isNotBlank()
+    val rawPhrase = if (isStaticFinal) displayedFinalPhrase else heldLivePhrase
     val phraseSize = when {
         rawPhrase.length < 35 -> if (compactScreen) 52.sp else 82.sp
         rawPhrase.length < 85 -> if (compactScreen) 40.sp else 64.sp
@@ -846,37 +862,34 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
                 ),
             contentAlignment = Alignment.Center
         ) {
-            if (showFinalPhrase) {
-                Text(
-                    text = decoratedPhrase,
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color.White,
-                    fontSize = phraseSize,
-                    lineHeight = (phraseSize.value * 1.18f).sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = if (rawPhrase.length > 55) TextAlign.Justify else TextAlign.Center,
-                    softWrap = true
-                )
-            } else {
-                AnimatedContent(
-                    targetState = animatedWord,
-                    transitionSpec = {
-                        (fadeIn(tween(110)) + scaleIn(initialScale = 0.88f, animationSpec = tween(150))) togetherWith
-                            fadeOut(tween(80))
-                    },
-                    label = "palabraDetectada"
-                ) { word ->
-                    val decoratedWord = if (ue) TeleoUtils.decorate(word) else word
+            AnimatedContent(
+                targetState = isStaticFinal,
+                transitionSpec = {
+                    (fadeIn(tween(320, delayMillis = 70)) + scaleIn(initialScale = 0.96f, animationSpec = tween(320))) togetherWith
+                        (fadeOut(tween(190)) + scaleOut(targetScale = 0.98f, animationSpec = tween(190)))
+                },
+                label = "transicionFrase"
+            ) { showFinal ->
+                if (showFinal) {
                     Text(
-                        text = if (decoratedWord.isBlank()) "" else ei + decoratedWord,
+                        text = if (ue) TeleoUtils.decorate(displayedFinalPhrase) else displayedFinalPhrase,
                         modifier = Modifier.fillMaxWidth(),
+                        color = Color.White,
+                        fontSize = phraseSize,
+                        lineHeight = (phraseSize.value * 1.18f).sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = if (displayedFinalPhrase.length > 55) TextAlign.Justify else TextAlign.Center,
+                        softWrap = true
+                    )
+                } else {
+                    RevealText(
+                        text = if (ue) TeleoUtils.decorate(heldLivePhrase) else heldLivePhrase,
+                        prefix = ei,
+                        modifier = Modifier.fillMaxWidth(0.72f),
                         color = emotionColor,
                         fontSize = if (uem && ce.value == "shouting") (phraseSize.value * 1.12f).sp else phraseSize,
                         lineHeight = if (uem && ce.value == "shouting") (phraseSize.value * 1.24f).sp else (phraseSize.value * 1.18f).sp,
-                        fontWeight = FontWeight.Black,
-                        fontStyle = if (uem && ce.value == "whispering") FontStyle.Italic else FontStyle.Normal,
-                        textAlign = TextAlign.Center,
-                        softWrap = true
+                        fontStyle = if (uem && ce.value == "whispering") FontStyle.Italic else FontStyle.Normal
                     )
                 }
             }
@@ -929,6 +942,45 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
             }
         }
     }
+}
+
+@Composable
+private fun RevealText(
+    text: String,
+    prefix: String,
+    modifier: Modifier,
+    color: Color,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    fontStyle: FontStyle
+) {
+    var revealedCodePoints by remember { mutableStateOf(0) }
+    var previousText by remember { mutableStateOf("") }
+    val codePointCount = text.codePointCount(0, text.length)
+
+    LaunchedEffect(text) {
+        val previousCodePoints = previousText.codePointCount(0, previousText.length)
+        revealedCodePoints = if (text.startsWith(previousText)) previousCodePoints.coerceAtMost(codePointCount) else 0
+        for (index in (revealedCodePoints + 1)..codePointCount) {
+            delay(22)
+            revealedCodePoints = index
+        }
+        previousText = text
+    }
+
+    val endIndex = if (revealedCodePoints >= codePointCount) text.length else text.offsetByCodePoints(0, revealedCodePoints)
+    Text(
+        text = if (text.isBlank()) "" else prefix + text.substring(0, endIndex),
+        modifier = modifier,
+        color = color,
+        fontSize = fontSize,
+        lineHeight = lineHeight,
+        fontWeight = FontWeight.Black,
+        fontStyle = fontStyle,
+        // El bloque se ancla a la izquierda para revelar de izquierda a derecha.
+        textAlign = TextAlign.Start,
+        softWrap = true
+    )
 }
 
 @Composable
