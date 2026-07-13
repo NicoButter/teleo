@@ -21,6 +21,7 @@ import android.util.Base64
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -98,6 +99,7 @@ val ColorPalette = listOf(CyberCyan, CyberTeal, CyberMagenta, CyberYellow, Color
 // --- MODELOS ---
 
 enum class Screen { Home, PalabraViva, EscribirYMostrar, TeleoCercaEntry, TeleoCercaCreate, TeleoCercaJoin, TeleoCercaChat, Scanner, Profile, AvatarCamera }
+enum class NearbyFlowState { IDLE, STARTING, SEARCHING, ADVERTISING, REQUESTING, WAITING_APPROVAL, CONNECTED, ERROR }
 
 data class TeleoNearbyMessage(
     val type: String = "",
@@ -142,15 +144,32 @@ class NearbyConnectionManager(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     
     var myName = Build.MODEL; var myId = UUID.randomUUID().toString(); var myColor = 0xFF00E5FF.toInt()
+    val sessionId = UUID.randomUUID().toString().substring(0, 8).uppercase()
     var isHost = mutableStateOf(false)
+    var flowState = mutableStateOf(NearbyFlowState.IDLE)
+    var statusMessage = mutableStateOf("")
     var connectedParticipants = mutableStateListOf<Participant>()
     var pendingRequests = mutableStateListOf<Participant>()
     var messages = mutableStateListOf<TeleoNearbyMessage>()
     var discoveredEndpoints = mutableStateListOf<Endpoint>()
     var remoteWord = mutableStateOf(""); var remoteSentence = mutableStateOf(""); var remoteEmotion = mutableStateOf("normal")
 
-    data class Endpoint(val id: String, val name: String)
+    data class Endpoint(val id: String, val name: String, val sessionId: String)
     data class Participant(val id: String, val name: String)
+    private var pendingScannedSession: String? = null
+
+    private fun endpointName(): String = "$sessionId|${myName.take(24)}"
+    private fun parseEndpoint(id: String, rawName: String): Endpoint {
+        val parts = rawName.split("|", limit = 2)
+        return if (parts.size == 2) Endpoint(id, parts[1], parts[0].uppercase()) else Endpoint(id, rawName, rawName.uppercase())
+    }
+
+    private fun fail(action: String, error: Exception) {
+        mainHandler.post {
+            flowState.value = NearbyFlowState.ERROR
+            statusMessage.value = "$action: ${error.localizedMessage ?: "servicio no disponible"}"
+        }
+    }
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(id: String, payload: Payload) {
@@ -171,9 +190,15 @@ class NearbyConnectionManager(private val context: Context) {
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(id: String, info: ConnectionInfo) {
             if (isHost.value) mainHandler.post {
-                if (pendingRequests.none { it.id == id }) pendingRequests.add(Participant(id, info.endpointName))
+                val endpoint = parseEndpoint(id, info.endpointName)
+                if (pendingRequests.none { it.id == id }) pendingRequests.add(Participant(id, endpoint.name))
+                flowState.value = NearbyFlowState.WAITING_APPROVAL
+                statusMessage.value = "Solicitud de ${endpoint.name}"
             }
-            else connectionsClient.acceptConnection(id, payloadCallback)
+            else {
+                mainHandler.post { flowState.value = NearbyFlowState.WAITING_APPROVAL; statusMessage.value = "Esperando aceptación del anfitrión…" }
+                connectionsClient.acceptConnection(id, payloadCallback).addOnFailureListener { fail("No se pudo preparar la conexión", it) }
+            }
         }
         override fun onConnectionResult(id: String, result: ConnectionResolution) {
             mainHandler.post {
@@ -182,7 +207,14 @@ class NearbyConnectionManager(private val context: Context) {
                     pendingRequests.removeAll { it.id == id }
                     if (connectedParticipants.none { it.id == id }) connectedParticipants.add(p)
                     messages.add(TeleoNearbyMessage(type = "system", message = "${p.name} conectado"))
-                } else pendingRequests.removeAll { it.id == id }
+                    flowState.value = NearbyFlowState.CONNECTED
+                    statusMessage.value = "Conectado"
+                    stopDiscovery()
+                } else {
+                    pendingRequests.removeAll { it.id == id }
+                    flowState.value = NearbyFlowState.ERROR
+                    statusMessage.value = "La conexión fue rechazada o no pudo completarse"
+                }
             }
         }
         override fun onDisconnected(id: String) {
@@ -193,16 +225,54 @@ class NearbyConnectionManager(private val context: Context) {
         }
     }
 
-    fun startAdvertising() { mainHandler.post { isHost.value = true; connectionsClient.startAdvertising(myName, SERVICE_ID, connectionLifecycleCallback, AdvertisingOptions.Builder().setStrategy(STRATEGY).build()) } }
+    fun startAdvertising() {
+        connectionsClient.stopAdvertising()
+        isHost.value = true; flowState.value = NearbyFlowState.STARTING; statusMessage.value = "Preparando charla…"
+        connectionsClient.startAdvertising(endpointName(), SERVICE_ID, connectionLifecycleCallback, AdvertisingOptions.Builder().setStrategy(STRATEGY).build())
+            .addOnSuccessListener { mainHandler.post { if (flowState.value == NearbyFlowState.STARTING) { flowState.value = NearbyFlowState.ADVERTISING; statusMessage.value = "Esperando solicitudes…" } } }
+            .addOnFailureListener { fail("No se pudo crear la charla", it) }
+    }
     fun stopAdvertising() { connectionsClient.stopAdvertising() }
-    fun startDiscovery() { mainHandler.post { isHost.value = false; discoveredEndpoints.clear(); connectionsClient.startDiscovery(SERVICE_ID, object : EndpointDiscoveryCallback() { override fun onEndpointFound(id: String, info: DiscoveredEndpointInfo) { if (discoveredEndpoints.none { it.id == id }) discoveredEndpoints.add(Endpoint(id, info.endpointName)) }; override fun onEndpointLost(id: String) { discoveredEndpoints.removeAll { it.id == id } } }, DiscoveryOptions.Builder().setStrategy(STRATEGY).build()) } }
+    fun startDiscovery() {
+        connectionsClient.stopDiscovery()
+        isHost.value = false; discoveredEndpoints.clear(); flowState.value = NearbyFlowState.STARTING; statusMessage.value = "Iniciando búsqueda…"
+        connectionsClient.startDiscovery(SERVICE_ID, object : EndpointDiscoveryCallback() {
+            override fun onEndpointFound(id: String, info: DiscoveredEndpointInfo) {
+                mainHandler.post {
+                    val endpoint = parseEndpoint(id, info.endpointName)
+                    if (discoveredEndpoints.none { it.id == id }) discoveredEndpoints.add(endpoint)
+                    if (pendingScannedSession == endpoint.sessionId) requestConnection(endpoint)
+                }
+            }
+            override fun onEndpointLost(id: String) { mainHandler.post { discoveredEndpoints.removeAll { it.id == id } } }
+        }, DiscoveryOptions.Builder().setStrategy(STRATEGY).build())
+            .addOnSuccessListener { mainHandler.post { if (flowState.value == NearbyFlowState.STARTING) { flowState.value = NearbyFlowState.SEARCHING; statusMessage.value = "Buscando charlas cercanas…" } } }
+            .addOnFailureListener { fail("No se pudo buscar dispositivos", it) }
+    }
     fun stopDiscovery() { connectionsClient.stopDiscovery() }
-    fun requestConnection(e: Endpoint) { connectionsClient.requestConnection(myName, e.id, connectionLifecycleCallback) }
-    fun accept(p: Participant) { connectionsClient.acceptConnection(p.id, payloadCallback) }
-    fun reject(p: Participant) { connectionsClient.rejectConnection(p.id); pendingRequests.remove(p) }
+    fun requestConnection(e: Endpoint) {
+        if (flowState.value == NearbyFlowState.REQUESTING || flowState.value == NearbyFlowState.WAITING_APPROVAL) return
+        pendingScannedSession = null; flowState.value = NearbyFlowState.REQUESTING; statusMessage.value = "Solicitando acceso a ${e.name}…"
+        connectionsClient.requestConnection(endpointName(), e.id, connectionLifecycleCallback)
+            .addOnSuccessListener { stopDiscovery() }
+            .addOnFailureListener { fail("No se pudo solicitar la conexión", it) }
+    }
+    fun requestConnectionBySession(code: String) {
+        val normalized = code.trim().uppercase()
+        discoveredEndpoints.firstOrNull { it.sessionId == normalized }?.let(::requestConnection) ?: run {
+            pendingScannedSession = normalized
+            flowState.value = NearbyFlowState.SEARCHING
+            statusMessage.value = "QR leído. Buscando esa charla…"
+        }
+    }
+    fun accept(p: Participant) {
+        flowState.value = NearbyFlowState.WAITING_APPROVAL; statusMessage.value = "Conectando con ${p.name}…"
+        connectionsClient.acceptConnection(p.id, payloadCallback).addOnFailureListener { fail("No se pudo aceptar la solicitud", it) }
+    }
+    fun reject(p: Participant) { connectionsClient.rejectConnection(p.id); pendingRequests.remove(p); flowState.value = NearbyFlowState.ADVERTISING; statusMessage.value = "Esperando solicitudes…" }
     fun kick(p: Participant) { connectionsClient.disconnectFromEndpoint(p.id); connectedParticipants.remove(p) }
     fun sendMessage(msg: TeleoNearbyMessage) { val msgW = msg.copy(senderId = myId, senderName = myName, senderColor = myColor); val bytes = msgW.toJSON().toByteArray(); connectedParticipants.forEach { connectionsClient.sendPayload(it.id, Payload.fromBytes(bytes)) }; if (msgW.type == "text" || msgW.type == "final") messages.add(msgW) }
-    fun disconnect() { connectionsClient.stopAllEndpoints(); connectedParticipants.clear(); pendingRequests.clear(); messages.clear(); isHost.value = false }
+    fun disconnect() { connectionsClient.stopDiscovery(); connectionsClient.stopAdvertising(); connectionsClient.stopAllEndpoints(); connectedParticipants.clear(); pendingRequests.clear(); discoveredEndpoints.clear(); messages.clear(); pendingScannedSession = null; isHost.value = false; flowState.value = NearbyFlowState.IDLE; statusMessage.value = "" }
 }
 
 // --- UTILIDADES ---
@@ -244,6 +314,7 @@ class MainActivity : ComponentActivity() {
     private val useEmojis = mutableStateOf(true); private val useEmotions = mutableStateOf(true); private val useWalkieTalkie = mutableStateOf(false); private val userName = mutableStateOf(""); private val userColor = mutableStateOf(0xFF00E5FF.toInt()); private val userAvatar = mutableStateOf<Bitmap?>(null)
     private var previousAudioMode = AudioManager.MODE_NORMAL
     private var isSpeechAudioConfigured = false
+    private var pendingPermissionScreen: Screen? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); hideSystemBars()
@@ -252,7 +323,7 @@ class MainActivity : ComponentActivity() {
         userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL; userColor.value = prefs.getInt("user_color", 0xFF00E5FF.toInt()); useWalkieTalkie.value = prefs.getBoolean("use_walkie_talkie", false)
         prefs.getString("user_avatar", null)?.let { userAvatar.value = TeleoUtils.fromB64(it) }
         nearbyManager = NearbyConnectionManager(this).apply { myName = userName.value; myColor = userColor.value }
-        initSpeechRecognizer(); hasRecordPermission.value = checkNearbyPermissions()
+        initSpeechRecognizer(); hasRecordPermission.value = hasRecordPermission()
         setContent { TeleoTheme { Surface(modifier = Modifier.fillMaxSize(), color = CyberDark) {
             when (currentScreen.value) {
                 Screen.Home -> HomeScreen(useEmojis, useEmotions, userName.value, userColor.value, userAvatar.value, onNavigate = { currentScreen.value = it })
@@ -280,10 +351,18 @@ class MainActivity : ComponentActivity() {
                 Screen.AvatarCamera -> AvatarCameraScreen(onCaptured = { b -> userAvatar.value = b; prefs.edit().putString("user_avatar", TeleoUtils.toB64(b)).apply(); currentScreen.value = Screen.Profile }, onBack = { currentScreen.value = Screen.Profile })
                 Screen.PalabraViva -> TeleoScreen(currentSentence, wordQueue, sentenceHistory, isListening, isProcessingFinal, hasRecordPermission, currentEmotion, useEmojis.value, useEmotions.value, useWalkieTalkie.value, onWalkieModeChange = { useWalkieTalkie.value = it; prefs.edit().putBoolean("use_walkie_talkie", it).apply() }, onStart = { startListening() }, onPause = { pauseListening() }, onClear = { currentSentence.value = ""; wordQueue.clear(); sentenceHistory.clear() }, onRequestPermission = { requestPermission() }, onBack = { pauseListening(); currentScreen.value = Screen.Home })
                 Screen.EscribirYMostrar -> WriteAndShowScreen(ue = useEmojis.value, onBackAction = { currentScreen.value = Screen.Home })
-                Screen.TeleoCercaEntry -> TeleoNearbyEntryScreen(useEmojis, useEmotions, onNavigate = { currentScreen.value = it }, onBack = { currentScreen.value = Screen.Home })
-                Screen.TeleoCercaCreate -> CreateNearbyChatScreen(nearbyManager, onConnected = { currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopAdvertising(); currentScreen.value = Screen.TeleoCercaEntry })
-                Screen.TeleoCercaJoin -> JoinNearbyChatScreen(nearbyManager, onScan = { if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) currentScreen.value = Screen.Scanner else requestPermission() }, onConnected = { currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopDiscovery(); currentScreen.value = Screen.TeleoCercaEntry })
-                Screen.Scanner -> QRScannerScreen(onScanResult = { r -> nearbyManager.discoveredEndpoints.find { it.name == r }?.let { nearbyManager.requestConnection(it) }; currentScreen.value = Screen.TeleoCercaJoin }, onBack = { currentScreen.value = Screen.TeleoCercaJoin })
+                Screen.TeleoCercaEntry -> TeleoNearbyEntryScreen(useEmojis, useEmotions, onNavigate = { target ->
+                    if (hasNearbyPermissions()) currentScreen.value = target else {
+                        pendingPermissionScreen = target
+                        requestNearbyPermissions()
+                    }
+                }, onBack = { currentScreen.value = Screen.Home })
+                Screen.TeleoCercaCreate -> CreateNearbyChatScreen(nearbyManager, onConnected = { nearbyManager.stopAdvertising(); currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopAdvertising(); currentScreen.value = Screen.TeleoCercaEntry })
+                Screen.TeleoCercaJoin -> JoinNearbyChatScreen(nearbyManager, onScan = {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) currentScreen.value = Screen.Scanner
+                    else { pendingPermissionScreen = Screen.Scanner; ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 1003) }
+                }, onConnected = { nearbyManager.stopDiscovery(); currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopDiscovery(); currentScreen.value = Screen.TeleoCercaEntry })
+                Screen.Scanner -> QRScannerScreen(onScanResult = { r -> nearbyManager.requestConnectionBySession(r); currentScreen.value = Screen.TeleoCercaJoin }, onBack = { currentScreen.value = Screen.TeleoCercaJoin })
                 Screen.TeleoCercaChat -> NearbyChatScreen(nearbyManager, isListening, useEmojis.value, useEmotions.value, onSV = { startListening() }, onPV = { pauseListening() }, onB = { nearbyManager.disconnect(); currentScreen.value = Screen.Home })
             }
         } } }
@@ -317,8 +396,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun checkNearbyPermissions(): Boolean { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); return p.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED } }
-    private fun requestPermission() { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); ActivityCompat.requestPermissions(this, p.toTypedArray(), 1001) }
+    private fun hasRecordPermission(): Boolean = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    private fun requestPermission() { ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1001) }
+    private fun nearbyPermissions(): Array<String> = buildList {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
+    }.toTypedArray()
+    private fun hasNearbyPermissions(): Boolean = nearbyPermissions().all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+    private fun requestNearbyPermissions() { ActivityCompat.requestPermissions(this, nearbyPermissions(), 1002) }
     private fun initSpeechRecognizer() {
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -399,9 +485,20 @@ class MainActivity : ComponentActivity() {
         audioManager.mode = previousAudioMode
         isSpeechAudioConfigured = false
     }
-    private fun startListening() { if (!checkNearbyPermissions()) { requestPermission(); return }; configureAudioForSpeech(); isListening.value = true; try { speechRecognizer.startListening(recognizerIntent) } catch (e: Exception) { restoreAudioMode(); isListening.value = false } }
+    private fun startListening() { if (!hasRecordPermission()) { requestPermission(); return }; configureAudioForSpeech(); isListening.value = true; try { speechRecognizer.startListening(recognizerIntent) } catch (e: Exception) { restoreAudioMode(); isListening.value = false } }
     private fun pauseListening() { try { speechRecognizer.stopListening() } catch (_: Exception) {}; restoreAudioMode(); isListening.value = false }
-    override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, gr: IntArray) { super.onRequestPermissionsResult(rc, p, gr); if (rc == 1001) hasRecordPermission.value = gr.isNotEmpty() && gr.all { it == PackageManager.PERMISSION_GRANTED } }
+    override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, gr: IntArray) {
+        super.onRequestPermissionsResult(rc, p, gr)
+        val granted = gr.isNotEmpty() && gr.all { it == PackageManager.PERMISSION_GRANTED }
+        when (rc) {
+            1001 -> hasRecordPermission.value = granted
+            1002, 1003 -> {
+                if (granted) pendingPermissionScreen?.let { currentScreen.value = it }
+                else Toast.makeText(this, if (rc == 1002) "Teleo Cerca necesita permisos de dispositivos cercanos" else "Se necesita la cámara para escanear el QR", Toast.LENGTH_LONG).show()
+                pendingPermissionScreen = null
+            }
+        }
+    }
     override fun onDestroy() { restoreAudioMode(); try { speechRecognizer.destroy() } catch (_: Exception) {}; nearbyManager.disconnect(); super.onDestroy() }
 }
 
@@ -857,7 +954,7 @@ fun TeleoNearbyEntryScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>
 
 @Composable
 fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> Unit, onBack: () -> Unit) {
-    val qrb = remember { TeleoUtils.generateQR(manager.myName) }
+    val qrb = remember(manager.sessionId) { TeleoUtils.generateQR(manager.sessionId) }
     LaunchedEffect(Unit) { manager.startAdvertising() }
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(CyberDark)) {
         val compactScreen = maxWidth < 900.dp
@@ -868,12 +965,12 @@ fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Surface(modifier = Modifier.fillMaxWidth(0.6f).aspectRatio(1f).padding(8.dp), shape = RoundedCornerShape(16.dp), color = Color.White) { qrb?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "QR", modifier = Modifier.fillMaxSize()) } }
                 Spacer(modifier = Modifier.height(24.dp))
-                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ID DISPOSITIVO", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 26.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(24.dp)); CircularProgressIndicator(color = CyberCyan); Spacer(modifier = Modifier.height(16.dp)); Text(text = "Esperando solicitudes...", color = Color.White.copy(alpha = 0.6f), textAlign = TextAlign.Center) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("CHARLA DE", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 26.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(18.dp)); NearbyStatus(manager, onRetry = { manager.startAdvertising() }) }
             }
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp)) {
                 Surface(modifier = Modifier.size(240.dp).padding(8.dp), shape = RoundedCornerShape(16.dp), color = Color.White) { qrb?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "QR", modifier = Modifier.fillMaxSize()) } }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("ID DISPOSITIVO", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(24.dp)); CircularProgressIndicator(color = CyberCyan); Spacer(modifier = Modifier.height(16.dp)); Text(text = "Esperando solicitudes...", color = Color.White.copy(alpha = 0.6f), textAlign = TextAlign.Center) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("CHARLA DE", color = Color.Gray, fontSize = 14.sp); Text(text = manager.myName, color = CyberCyan, fontSize = 32.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(18.dp)); NearbyStatus(manager, onRetry = { manager.startAdvertising() }) }
             }
         }
         if (manager.pendingRequests.isNotEmpty()) {
@@ -890,7 +987,7 @@ fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> 
                 }
             }
         }
-        if (manager.connectedParticipants.isNotEmpty()) LaunchedEffect(Unit) { onConnected() }
+        if (manager.flowState.value == NearbyFlowState.CONNECTED) LaunchedEffect(Unit) { onConnected() }
     }
     }
 }
@@ -898,7 +995,7 @@ fun CreateNearbyChatScreen(manager: NearbyConnectionManager, onConnected: () -> 
 @Composable
 fun JoinNearbyChatScreen(manager: NearbyConnectionManager, onScan: () -> Unit, onConnected: () -> Unit, onBack: () -> Unit) {
     LaunchedEffect(Unit) { manager.startDiscovery() }
-    if (manager.connectedParticipants.isNotEmpty()) LaunchedEffect(Unit) { onConnected() }
+    if (manager.flowState.value == NearbyFlowState.CONNECTED) LaunchedEffect(Unit) { onConnected() }
     BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(24.dp)) {
         val compactScreen = maxWidth < 780.dp
         Column(modifier = Modifier.fillMaxSize()) {
@@ -912,9 +1009,27 @@ fun JoinNearbyChatScreen(manager: NearbyConnectionManager, onScan: () -> Unit, o
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { IconButton(onClick = onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("UNIRSE", color = CyberCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold); Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = CyberDark), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.QrCodeScanner, null); Spacer(modifier = Modifier.width(8.dp)); Text("ESCANEAR") } }
         }
         Spacer(modifier = Modifier.height(16.dp))
-        if (manager.discoveredEndpoints.isEmpty()) Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { CircularProgressIndicator(color = CyberCyan.copy(alpha = 0.3f)); Text(text = "Buscando...", color = Color.Gray) } }
-        else LazyColumn(modifier = Modifier.weight(1f)) { items(manager.discoveredEndpoints) { e -> Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable { manager.requestConnection(e) }, colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f))) { Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Text(e.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.weight(1f)); Text("SOLICITAR >", color = CyberCyan, fontSize = 14.sp) } } } }
+        NearbyStatus(manager, onRetry = { manager.startDiscovery() })
+        Spacer(modifier = Modifier.height(10.dp))
+        val canSelect = manager.flowState.value == NearbyFlowState.SEARCHING
+        if (manager.discoveredEndpoints.isEmpty()) Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text(text = if (manager.flowState.value == NearbyFlowState.ERROR) "Revisá los permisos, Bluetooth y Wi‑Fi" else "Las charlas aparecerán aquí", color = Color.Gray) }
+        else LazyColumn(modifier = Modifier.weight(1f)) { items(manager.discoveredEndpoints, key = { it.id }) { e -> Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable(enabled = canSelect) { manager.requestConnection(e) }, colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = if (canSelect) 0.05f else 0.025f))) { Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Column { Text(e.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold); Text("Sesión ${e.sessionId}", color = Color.Gray, fontSize = 11.sp) }; Spacer(modifier = Modifier.weight(1f)); Text(if (canSelect) "UNIRME  ›" else "ESPERÁ…", color = CyberCyan.copy(alpha = if (canSelect) 1f else 0.4f), fontSize = 14.sp) } } } }
     }
+    }
+}
+
+@Composable
+private fun NearbyStatus(manager: NearbyConnectionManager, onRetry: () -> Unit) {
+    val state = manager.flowState.value
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        when (state) {
+            NearbyFlowState.STARTING, NearbyFlowState.SEARCHING, NearbyFlowState.ADVERTISING, NearbyFlowState.REQUESTING, NearbyFlowState.WAITING_APPROVAL -> CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = CyberCyan)
+            NearbyFlowState.CONNECTED -> Icon(Icons.Default.CheckCircle, null, tint = CyberTeal)
+            NearbyFlowState.ERROR -> Icon(Icons.Default.ErrorOutline, null, tint = Color.Red)
+            NearbyFlowState.IDLE -> Icon(Icons.Default.Wifi, null, tint = Color.Gray)
+        }
+        Text(manager.statusMessage.value.ifBlank { "Preparando…" }, color = if (state == NearbyFlowState.ERROR) Color.Red.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.65f), fontSize = 13.sp)
+        if (state == NearbyFlowState.ERROR) TextButton(onClick = onRetry) { Text("REINTENTAR", color = CyberCyan, fontWeight = FontWeight.Bold) }
     }
 }
 
