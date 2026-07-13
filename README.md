@@ -6,6 +6,12 @@
 
 Teleo es una aplicación enfocada en la comunicación en tiempo real, facilitando la interacción mediante tecnología de reconocimiento de voz y conectividad de proximidad.
 
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/logo_vetrabyte.png" alt="Vetrabyte Software Development" width="260">
+</p>
+
+> **Teleo es un producto creado por Vetrabyte**, estudio de desarrollo de software enfocado en crear experiencias tecnológicas útiles, accesibles y humanas.
+
 ## Características Principales
 
 - **Palabra Viva**: Visualización en tiempo real de lo que se está hablando.
@@ -49,9 +55,11 @@ El proyecto utiliza un archivo `.env` para gestionar variables sensibles. Asegú
 
 ## Contacto
 
-Desarrollado por **Nicolas Butterfield**  
+Un producto de **Vetrabyte Software Development**.
+
+Desarrollado por **Nicolas Butterfield**.
 - Email: [nicobutter@gmail.com](mailto:nicobutter@gmail.com)  
 - GitHub: [@nicobutter](https://github.com/nicobutter)
 
 ---
-Desarrollado para mejorar la comunicación.
+Diseñado para mejorar la comunicación.
