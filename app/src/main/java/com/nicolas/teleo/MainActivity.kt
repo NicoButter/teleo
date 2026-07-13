@@ -316,6 +316,7 @@ class MainActivity : ComponentActivity() {
     private var previousAudioMode = AudioManager.MODE_NORMAL
     private var isSpeechAudioConfigured = false
     private var pendingPermissionScreen: Screen? = null
+    private val showStartupSplash = mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); hideSystemBars()
@@ -326,7 +327,13 @@ class MainActivity : ComponentActivity() {
         nearbyManager = NearbyConnectionManager(this).apply { myName = userName.value; myColor = userColor.value }
         initSpeechRecognizer(); hasRecordPermission.value = hasRecordPermission()
         setContent { TeleoTheme { Surface(modifier = Modifier.fillMaxSize(), color = CyberDark) {
-            when (currentScreen.value) {
+            if (showStartupSplash.value) {
+                LaunchedEffect(Unit) {
+                    delay(1400)
+                    showStartupSplash.value = false
+                }
+                StartupSplashScreen()
+            } else when (currentScreen.value) {
                 Screen.Home -> HomeScreen(useEmojis, useEmotions, userName.value, userColor.value, userAvatar.value, onNavigate = { currentScreen.value = it })
                 Screen.Profile -> ProfileScreen(
                     cn = userName.value,
@@ -506,6 +513,35 @@ class MainActivity : ComponentActivity() {
 // --- COMPOSABLES ---
 
 @Composable
+fun StartupSplashScreen() {
+    Box(
+        modifier = Modifier.fillMaxSize().background(CyberDark),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(
+                painter = painterResource(id = R.drawable.app_icon_new),
+                contentDescription = "Logo Teleo",
+                modifier = Modifier.size(142.dp),
+                contentScale = ContentScale.Fit
+            )
+            Spacer(Modifier.height(28.dp))
+            Box(modifier = Modifier.width(210.dp).height(1.dp).background(CyberCyan.copy(alpha = 0.35f)))
+            Spacer(Modifier.height(22.dp))
+            Image(
+                painter = painterResource(id = R.drawable.logo_vetrabyte),
+                contentDescription = "Vetrabyte Software Development",
+                modifier = Modifier.width(270.dp).height(78.dp),
+                contentScale = ContentScale.Fit,
+                alpha = 0.95f
+            )
+            Spacer(Modifier.height(22.dp))
+            Text("SOFTWARE QUE CONECTA", color = Color.White.copy(alpha = 0.42f), fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
 fun HomeScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, un: String, uc: Int, ua: Bitmap?, onNavigate: (Screen) -> Unit) {
     val act = LocalContext.current as? android.app.Activity
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26))))) {
@@ -544,17 +580,6 @@ fun HomeScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, un: String
                     }
                 }
             }
-            Image(
-                painter = painterResource(id = R.drawable.logo_vetrabyte),
-                contentDescription = "Vetrabyte Software Development",
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(top = 2.dp, bottom = 10.dp)
-                    .widthIn(max = 250.dp)
-                    .heightIn(max = 58.dp),
-                contentScale = ContentScale.Fit,
-                alpha = 0.92f
-            )
             if (compactCards) {
                 Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
