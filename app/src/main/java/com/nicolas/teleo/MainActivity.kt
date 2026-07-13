@@ -216,7 +216,7 @@ class MainActivity : ComponentActivity() {
     private val currentSentence = mutableStateOf(""); private val wordQueue = mutableStateListOf<String>(); private val sentenceHistory = mutableStateListOf<String>()
     private val isListening = mutableStateOf(false); private val isProcessingFinal = mutableStateOf(false); private val hasRecordPermission = mutableStateOf(false)
     private val lastRms = mutableStateOf(0f); private val currentEmotion = mutableStateOf("normal"); private val currentScreen = mutableStateOf(Screen.Home)
-    private val useEmojis = mutableStateOf(true); private val useEmotions = mutableStateOf(true); private val userName = mutableStateOf(""); private val userColor = mutableStateOf(0xFF00E5FF.toInt()); private val userAvatar = mutableStateOf<Bitmap?>(null)
+    private val useEmojis = mutableStateOf(true); private val useEmotions = mutableStateOf(true); private val useWalkieTalkie = mutableStateOf(false); private val userName = mutableStateOf(""); private val userColor = mutableStateOf(0xFF00E5FF.toInt()); private val userAvatar = mutableStateOf<Bitmap?>(null)
     private var previousAudioMode = AudioManager.MODE_NORMAL
     private var isSpeechAudioConfigured = false
 
@@ -224,7 +224,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState); enableEdgeToEdge(); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); hideSystemBars()
         val prefs = getSharedPreferences("teleo_prefs", Context.MODE_PRIVATE)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL; userColor.value = prefs.getInt("user_color", 0xFF00E5FF.toInt())
+        userName.value = prefs.getString("user_name", Build.MODEL) ?: Build.MODEL; userColor.value = prefs.getInt("user_color", 0xFF00E5FF.toInt()); useWalkieTalkie.value = prefs.getBoolean("use_walkie_talkie", false)
         prefs.getString("user_avatar", null)?.let { userAvatar.value = TeleoUtils.fromB64(it) }
         nearbyManager = NearbyConnectionManager(this).apply { myName = userName.value; myColor = userColor.value }
         initSpeechRecognizer(); hasRecordPermission.value = checkNearbyPermissions()
@@ -233,7 +233,7 @@ class MainActivity : ComponentActivity() {
                 Screen.Home -> HomeScreen(useEmojis, useEmotions, userName.value, userColor.value, userAvatar.value, onNavigate = { currentScreen.value = it })
                 Screen.Profile -> ProfileScreen(userName.value, userColor.value, userAvatar.value, onSave = { n, c -> userName.value = n; userColor.value = c; nearbyManager.myName = n; nearbyManager.myColor = c; prefs.edit().putString("user_name", n).putInt("user_color", c).apply(); currentScreen.value = Screen.Home }, onTakeAvatar = { if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) currentScreen.value = Screen.AvatarCamera else requestPermission() }, onBack = { currentScreen.value = Screen.Home })
                 Screen.AvatarCamera -> AvatarCameraScreen(onCaptured = { b -> userAvatar.value = b; prefs.edit().putString("user_avatar", TeleoUtils.toB64(b)).apply(); currentScreen.value = Screen.Profile }, onBack = { currentScreen.value = Screen.Profile })
-                Screen.PalabraViva -> TeleoScreen(currentSentence, wordQueue, sentenceHistory, isListening, isProcessingFinal, hasRecordPermission, currentEmotion, useEmojis.value, useEmotions.value, onStart = { startListening() }, onPause = { pauseListening() }, onClear = { currentSentence.value = ""; wordQueue.clear(); sentenceHistory.clear() }, onRequestPermission = { requestPermission() }, onBack = { pauseListening(); currentScreen.value = Screen.Home })
+                Screen.PalabraViva -> TeleoScreen(currentSentence, wordQueue, sentenceHistory, isListening, isProcessingFinal, hasRecordPermission, currentEmotion, useEmojis.value, useEmotions.value, useWalkieTalkie.value, onWalkieModeChange = { useWalkieTalkie.value = it; prefs.edit().putBoolean("use_walkie_talkie", it).apply() }, onStart = { startListening() }, onPause = { pauseListening() }, onClear = { currentSentence.value = ""; wordQueue.clear(); sentenceHistory.clear() }, onRequestPermission = { requestPermission() }, onBack = { pauseListening(); currentScreen.value = Screen.Home })
                 Screen.EscribirYMostrar -> WriteAndShowScreen(ue = useEmojis.value, onBackAction = { currentScreen.value = Screen.Home })
                 Screen.TeleoCercaEntry -> TeleoNearbyEntryScreen(useEmojis, useEmotions, onNavigate = { currentScreen.value = it }, onBack = { currentScreen.value = Screen.Home })
                 Screen.TeleoCercaCreate -> CreateNearbyChatScreen(nearbyManager, onConnected = { currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopAdvertising(); currentScreen.value = Screen.TeleoCercaEntry })
@@ -402,10 +402,12 @@ fun AvatarCameraScreen(onCaptured: (Bitmap) -> Unit, onBack: () -> Unit) {
 }
 
 @Composable
-fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<String>, isl: MutableState<Boolean>, ipf: MutableState<Boolean>, hp: MutableState<Boolean>, ce: MutableState<String>, ue: Boolean, uem: Boolean, onStart: () -> Unit, onPause: () -> Unit, onClear: () -> Unit, onRequestPermission: () -> Unit, onBack: () -> Unit) {
+fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<String>, isl: MutableState<Boolean>, ipf: MutableState<Boolean>, hp: MutableState<Boolean>, ce: MutableState<String>, ue: Boolean, uem: Boolean, uwt: Boolean, onWalkieModeChange: (Boolean) -> Unit, onStart: () -> Unit, onPause: () -> Unit, onClear: () -> Unit, onRequestPermission: () -> Unit, onBack: () -> Unit) {
     val configuration = LocalConfiguration.current
     val compactScreen = configuration.screenWidthDp < 800 || configuration.screenHeightDp < 480
-    val rawPhrase = (sh + cs.value).filter { it.isNotBlank() }.joinToString(" ").trim()
+    val livePhrase = cs.value.trim()
+    val finalPhrase = sh.lastOrNull()?.trim().orEmpty()
+    val rawPhrase = livePhrase.ifBlank { finalPhrase }
     val decoratedPhrase = if (ue) TeleoUtils.decorate(rawPhrase) else rawPhrase
     val phraseSize = when {
         rawPhrase.length < 35 -> if (compactScreen) 52.sp else 82.sp
@@ -434,13 +436,27 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
                     end = if (compactScreen) 16.dp else 32.dp,
                     bottom = if (compactScreen) 16.dp else 24.dp
                 )
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .then(
+                    if (uwt && hp.value) {
+                        Modifier.pointerInput(uwt, isl.value) {
+                            detectTapGestures(
+                                onPress = {
+                                    val startedByPress = !isl.value
+                                    if (startedByPress) onStart()
+                                    tryAwaitRelease()
+                                    if (startedByPress) onPause()
+                                }
+                            )
+                        }
+                    } else Modifier
+                ),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = if (decoratedPhrase.isBlank()) "" else ei + decoratedPhrase,
                 modifier = Modifier.fillMaxWidth(),
-                color = emotionColor,
+                color = if (livePhrase.isNotBlank()) emotionColor else Color.White.copy(alpha = 0.92f),
                 fontSize = if (uem && ce.value == "shouting") (phraseSize.value * 1.12f).sp else phraseSize,
                 lineHeight = if (uem && ce.value == "shouting") (phraseSize.value * 1.24f).sp else (phraseSize.value * 1.18f).sp,
                 fontWeight = FontWeight.Black,
@@ -464,23 +480,32 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
                 TextButton(onClick = onRequestPermission, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("PERMISO", color = Color.Red.copy(alpha = 0.75f), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compactScreen) 2.dp else 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("WT", color = Color.White.copy(alpha = 0.45f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Switch(
+                            checked = uwt,
+                            onCheckedChange = {
+                                if (it && isl.value) onPause()
+                                onWalkieModeChange(it)
+                            },
+                            modifier = Modifier.height(28.dp),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = CyberCyan,
+                                checkedTrackColor = CyberCyan.copy(alpha = 0.28f),
+                                uncheckedThumbColor = Color.White.copy(alpha = 0.45f),
+                                uncheckedTrackColor = Color.White.copy(alpha = 0.12f)
+                            )
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(if (isl.value) CyberCyan.copy(alpha = 0.14f) else Color.Transparent)
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onPress = {
-                                        if (!isl.value) onStart()
-                                        tryAwaitRelease()
-                                        onPause()
-                                    }
-                                )
-                            },
+                            .clickable(enabled = !isl.value) { onStart() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Mic, "Mantener presionado para hablar", tint = if (isl.value) CyberTeal else CyberCyan.copy(alpha = 0.75f), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Mic, "Tocar para activar micrófono", tint = if (isl.value) CyberTeal else CyberCyan.copy(alpha = 0.75f), modifier = Modifier.size(20.dp))
                     }
                     IconButton(onClick = onPause, enabled = isl.value, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Pause, "Pausa", tint = if (isl.value) CyberMagenta.copy(alpha = 0.75f) else Color.White.copy(alpha = 0.24f), modifier = Modifier.size(20.dp)) }
                     IconButton(onClick = onClear, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.RestartAlt, "Reset", tint = CyberYellow.copy(alpha = 0.7f), modifier = Modifier.size(20.dp)) }
