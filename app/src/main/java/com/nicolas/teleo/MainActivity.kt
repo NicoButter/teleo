@@ -274,8 +274,74 @@ class MainActivity : ComponentActivity() {
 
     private fun checkNearbyPermissions(): Boolean { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); return p.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED } }
     private fun requestPermission() { val p = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) p.addAll(listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) p.add(Manifest.permission.NEARBY_WIFI_DEVICES); ActivityCompat.requestPermissions(this, p.toTypedArray(), 1001) }
-    private fun initSpeechRecognizer() { speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this); recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM); putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true) }; speechRecognizer.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { isProcessingFinal.value = false }; override fun onBeginningOfSpeech() { if (currentScreen.value == Screen.PalabraViva) { sentenceHistory.clear(); currentSentence.value = ""; wordQueue.clear() } }; override fun onRmsChanged(r: Float) { lastRms.value = r; if (isListening.value) currentEmotion.value = determineEmotion(currentSentence.value) }; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() {}; override fun onError(e: Int) { if (isListening.value && (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 500) else if (e != SpeechRecognizer.ERROR_CLIENT) isListening.value = false }; override fun onPartialResults(pr: Bundle?) { pr?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { t -> currentEmotion.value = determineEmotion(t); processLiveText(t); if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "partial", emotion = currentEmotion.value, currentWord = t.split("\\s+").lastOrNull() ?: "", currentSentence = t)) } }; override fun onResults(r: Bundle?) { isProcessingFinal.value = true; r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { f -> if (f.isNotBlank()) { if (currentScreen.value == Screen.PalabraViva) { sentenceHistory.clear(); sentenceHistory.add(f) } else if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(TeleoNearbyMessage(type = "final", emotion = determineEmotion(f), message = f)) } }; currentSentence.value = ""; wordQueue.clear(); currentEmotion.value = "normal"; if (isListening.value) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 400) }; override fun onEvent(ev: Int, p: Bundle?) {} }) }
-    private fun processLiveText(t: String) { if (isProcessingFinal.value || t == currentSentence.value) return; val old = currentSentence.value.trim().split("\\s+").filter { it.isNotBlank() }.size; val new = t.trim().split("\\s+").filter { it.isNotBlank() }.size; currentSentence.value = t; if (new > old) for (i in old until new) wordQueue.add(t.trim().split("\\s+").filter { it.isNotBlank() }[i]) }
+    private fun initSpeechRecognizer() {
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(p: Bundle?) { isProcessingFinal.value = false }
+            override fun onBeginningOfSpeech() {
+                if (currentScreen.value == Screen.PalabraViva) {
+                    // La frase final anterior permanece visible hasta recibir texto real.
+                    currentSentence.value = ""
+                    wordQueue.clear()
+                }
+            }
+            override fun onRmsChanged(r: Float) { lastRms.value = r; if (isListening.value) currentEmotion.value = determineEmotion(currentSentence.value) }
+            override fun onBufferReceived(b: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(e: Int) {
+                if (isListening.value && (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) {
+                    Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 500)
+                } else if (e != SpeechRecognizer.ERROR_CLIENT) isListening.value = false
+            }
+            override fun onPartialResults(pr: Bundle?) {
+                pr?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { t ->
+                    currentEmotion.value = determineEmotion(t)
+                    processLiveText(t)
+                    if (currentScreen.value == Screen.TeleoCercaChat) nearbyManager.sendMessage(
+                        TeleoNearbyMessage(type = "partial", emotion = currentEmotion.value, currentWord = t.split("\\s+").lastOrNull() ?: "", currentSentence = t)
+                    )
+                }
+            }
+            override fun onResults(r: Bundle?) {
+                // La capa animada se cancela antes de publicar el resultado definitivo.
+                isProcessingFinal.value = true
+                currentSentence.value = ""
+                wordQueue.clear()
+                r?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.uppercase()?.let { f ->
+                    if (f.isNotBlank()) {
+                        if (currentScreen.value == Screen.PalabraViva) {
+                            sentenceHistory.clear()
+                            sentenceHistory.add(f)
+                        } else if (currentScreen.value == Screen.TeleoCercaChat) {
+                            nearbyManager.sendMessage(TeleoNearbyMessage(type = "final", emotion = determineEmotion(f), message = f))
+                        }
+                    }
+                }
+                currentEmotion.value = "normal"
+                if (isListening.value) Handler(Looper.getMainLooper()).postDelayed({ if (isListening.value) startListening() }, 400)
+            }
+            override fun onEvent(ev: Int, p: Bundle?) {}
+        })
+    }
+
+    private fun processLiveText(t: String) {
+        val normalized = t.trim()
+        if (isProcessingFinal.value || normalized.isBlank() || normalized == currentSentence.value) return
+
+        if (currentScreen.value == Screen.PalabraViva && currentSentence.value.isBlank()) sentenceHistory.clear()
+        currentSentence.value = normalized
+
+        // Los parciales pueden corregirse; la UI siempre anima la última versión reconocida.
+        val latestWord = normalized.split("\\s+".toRegex()).last()
+        if (wordQueue.lastOrNull() != latestWord) {
+            wordQueue.clear()
+            wordQueue.add(latestWord)
+        }
+    }
     private fun determineEmotion(t: String): String { if (!useEmotions.value) return "normal"; val u = t.uppercase(); return when { u.contains("JAJA") || u.contains("HAHA") -> "laughing"; lastRms.value > 10f -> "shouting"; lastRms.value < 1.5f && lastRms.value > -2f -> "whispering"; else -> "normal" } }
     private fun configureAudioForSpeech() {
         if (isSpeechAudioConfigured) return
@@ -407,7 +473,9 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
     val compactScreen = configuration.screenWidthDp < 800 || configuration.screenHeightDp < 480
     val livePhrase = cs.value.trim()
     val finalPhrase = sh.lastOrNull()?.trim().orEmpty()
-    val rawPhrase = livePhrase.ifBlank { finalPhrase }
+    val showFinalPhrase = finalPhrase.isNotBlank() && (ipf.value || livePhrase.isBlank())
+    val animatedWord = if (showFinalPhrase) "" else wq.lastOrNull().orEmpty()
+    val rawPhrase = if (showFinalPhrase) finalPhrase else animatedWord
     val decoratedPhrase = if (ue) TeleoUtils.decorate(rawPhrase) else rawPhrase
     val phraseSize = when {
         rawPhrase.length < 35 -> if (compactScreen) 52.sp else 82.sp
@@ -424,7 +492,6 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
             else -> Color.White
         }
     } else Color.White
-    LaunchedEffect(wq.size, ipf.value) { if (ipf.value) wq.clear() else if (wq.isNotEmpty()) while (wq.isNotEmpty()) { wq.removeAt(0); delay(350) } }
     Box(modifier = Modifier.fillMaxSize().background(CyberDark)) {
         val ei = if (uem) { when(ce.value) { "shouting" -> "📢 "; "whispering" -> "🤫 "; "laughing" -> "😂 "; else -> "" } } else ""
         Box(
@@ -453,17 +520,40 @@ fun TeleoScreen(cs: MutableState<String>, wq: MutableList<String>, sh: List<Stri
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = if (decoratedPhrase.isBlank()) "" else ei + decoratedPhrase,
-                modifier = Modifier.fillMaxWidth(),
-                color = if (livePhrase.isNotBlank()) emotionColor else Color.White.copy(alpha = 0.92f),
-                fontSize = if (uem && ce.value == "shouting") (phraseSize.value * 1.12f).sp else phraseSize,
-                lineHeight = if (uem && ce.value == "shouting") (phraseSize.value * 1.24f).sp else (phraseSize.value * 1.18f).sp,
-                fontWeight = FontWeight.Black,
-                fontStyle = if (uem && ce.value == "whispering") FontStyle.Italic else FontStyle.Normal,
-                textAlign = if (rawPhrase.length > 55) TextAlign.Justify else TextAlign.Center,
-                softWrap = true
-            )
+            if (showFinalPhrase) {
+                Text(
+                    text = decoratedPhrase,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.White,
+                    fontSize = phraseSize,
+                    lineHeight = (phraseSize.value * 1.18f).sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = if (rawPhrase.length > 55) TextAlign.Justify else TextAlign.Center,
+                    softWrap = true
+                )
+            } else {
+                AnimatedContent(
+                    targetState = animatedWord,
+                    transitionSpec = {
+                        (fadeIn(tween(110)) + scaleIn(initialScale = 0.88f, animationSpec = tween(150))) togetherWith
+                            fadeOut(tween(80))
+                    },
+                    label = "palabraDetectada"
+                ) { word ->
+                    val decoratedWord = if (ue) TeleoUtils.decorate(word) else word
+                    Text(
+                        text = if (decoratedWord.isBlank()) "" else ei + decoratedWord,
+                        modifier = Modifier.fillMaxWidth(),
+                        color = emotionColor,
+                        fontSize = if (uem && ce.value == "shouting") (phraseSize.value * 1.12f).sp else phraseSize,
+                        lineHeight = if (uem && ce.value == "shouting") (phraseSize.value * 1.24f).sp else (phraseSize.value * 1.18f).sp,
+                        fontWeight = FontWeight.Black,
+                        fontStyle = if (uem && ce.value == "whispering") FontStyle.Italic else FontStyle.Normal,
+                        textAlign = TextAlign.Center,
+                        softWrap = true
+                    )
+                }
+            }
         }
         Row(
             modifier = Modifier
