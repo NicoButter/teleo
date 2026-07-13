@@ -59,6 +59,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -543,6 +544,17 @@ fun HomeScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, un: String
                     }
                 }
             }
+            Image(
+                painter = painterResource(id = R.drawable.logo_vetrabyte),
+                contentDescription = "Vetrabyte Software Development",
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 2.dp, bottom = 10.dp)
+                    .widthIn(max = 250.dp)
+                    .heightIn(max = 58.dp),
+                contentScale = ContentScale.Fit,
+                alpha = 0.92f
+            )
             if (compactCards) {
                 Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
