@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -19,8 +22,10 @@ import android.util.Log
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
@@ -35,6 +40,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -206,6 +212,25 @@ object TeleoUtils {
     fun generateQR(c: String): Bitmap? { try { val m = QRCodeWriter().encode(c, BarcodeFormat.QR_CODE, 512, 512); val b = Bitmap.createBitmap(m.width, m.height, Bitmap.Config.RGB_565); for (x in 0 until m.width) for (y in 0 until m.height) b.setPixel(x, y, if (m.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE); return b } catch (e: Exception) { return null } }
     fun toB64(b: Bitmap): String { val out = ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.PNG, 100, out); return Base64.encodeToString(out.toByteArray(), Base64.DEFAULT) }
     fun fromB64(s: String): Bitmap? { try { val b = Base64.decode(s, Base64.DEFAULT); return BitmapFactory.decodeByteArray(b, 0, b.size) } catch (e: Exception) { return null } }
+    fun prepareAvatar(bitmap: Bitmap, rotationDegrees: Int = 0): Bitmap {
+        val rotated = if (rotationDegrees != 0) Bitmap.createBitmap(
+            bitmap, 0, 0, bitmap.width, bitmap.height,
+            Matrix().apply { postRotate(rotationDegrees.toFloat()) }, true
+        ) else bitmap
+        val side = minOf(rotated.width, rotated.height)
+        val square = Bitmap.createBitmap(rotated, (rotated.width - side) / 2, (rotated.height - side) / 2, side, side)
+        return Bitmap.createScaledBitmap(square, 384, 384, true)
+    }
+    fun avatarFromUri(context: Context, uri: Uri): Bitmap? = try {
+        val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } else {
+            context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
+        }
+        bitmap?.let(::prepareAvatar)
+    } catch (_: Exception) { null }
 }
 
 // --- ACTIVIDAD PRINCIPAL ---
@@ -231,7 +256,27 @@ class MainActivity : ComponentActivity() {
         setContent { TeleoTheme { Surface(modifier = Modifier.fillMaxSize(), color = CyberDark) {
             when (currentScreen.value) {
                 Screen.Home -> HomeScreen(useEmojis, useEmotions, userName.value, userColor.value, userAvatar.value, onNavigate = { currentScreen.value = it })
-                Screen.Profile -> ProfileScreen(userName.value, userColor.value, userAvatar.value, onSave = { n, c -> userName.value = n; userColor.value = c; nearbyManager.myName = n; nearbyManager.myColor = c; prefs.edit().putString("user_name", n).putInt("user_color", c).apply(); currentScreen.value = Screen.Home }, onTakeAvatar = { if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) currentScreen.value = Screen.AvatarCamera else requestPermission() }, onBack = { currentScreen.value = Screen.Home })
+                Screen.Profile -> ProfileScreen(
+                    cn = userName.value,
+                    cc = userColor.value,
+                    ca = userAvatar.value,
+                    onSave = { n, c ->
+                        userName.value = n
+                        userColor.value = c
+                        nearbyManager.myName = n
+                        nearbyManager.myColor = c
+                        prefs.edit().putString("user_name", n).putInt("user_color", c).apply()
+                        currentScreen.value = Screen.Home
+                    },
+                    onAvatarChange = { avatar ->
+                        userAvatar.value = avatar
+                        prefs.edit().apply {
+                            if (avatar == null) remove("user_avatar") else putString("user_avatar", TeleoUtils.toB64(avatar))
+                        }.apply()
+                    },
+                    onTakeAvatar = { currentScreen.value = Screen.AvatarCamera },
+                    onBack = { currentScreen.value = Screen.Home }
+                )
                 Screen.AvatarCamera -> AvatarCameraScreen(onCaptured = { b -> userAvatar.value = b; prefs.edit().putString("user_avatar", TeleoUtils.toB64(b)).apply(); currentScreen.value = Screen.Profile }, onBack = { currentScreen.value = Screen.Profile })
                 Screen.PalabraViva -> TeleoScreen(currentSentence, wordQueue, sentenceHistory, isListening, isProcessingFinal, hasRecordPermission, currentEmotion, useEmojis.value, useEmotions.value, useWalkieTalkie.value, onWalkieModeChange = { useWalkieTalkie.value = it; prefs.edit().putBoolean("use_walkie_talkie", it).apply() }, onStart = { startListening() }, onPause = { pauseListening() }, onClear = { currentSentence.value = ""; wordQueue.clear(); sentenceHistory.clear() }, onRequestPermission = { requestPermission() }, onBack = { pauseListening(); currentScreen.value = Screen.Home })
                 Screen.EscribirYMostrar -> WriteAndShowScreen(ue = useEmojis.value, onBackAction = { currentScreen.value = Screen.Home })
@@ -432,24 +477,159 @@ fun HomeCard(modifier: Modifier, t: String, d: String, i: ImageVector, c: Color,
 }
 
 @Composable
-fun ProfileScreen(cn: String, cc: Int, ca: Bitmap?, onSave: (String, Int) -> Unit, onTakeAvatar: () -> Unit, onBack: () -> Unit) {
-    var n by remember { mutableStateOf(cn) }; var c by remember { mutableStateOf(cc) }
-    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26))))) {
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onBack) { Icon(Icons.Default.Home, null, tint = Color.Gray) }; Text("PERFIL", color = Color(c), fontSize = 24.sp, fontWeight = FontWeight.Black); Spacer(Modifier.size(48.dp)) }
-        Spacer(Modifier.height(24.dp))
-        Box(modifier = Modifier.size(140.dp).clickable { onTakeAvatar() }, contentAlignment = Alignment.Center) {
-            if (ca != null) Image(ca.asImageBitmap(), null, Modifier.fillMaxSize().clip(CircleShape).border(3.dp, Color(c), CircleShape), contentScale = ContentScale.Crop)
-            else Box(modifier = Modifier.fillMaxSize().background(Color(c).copy(alpha = 0.1f), CircleShape).border(2.dp, Color(c), CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Default.AddAPhoto, null, modifier = Modifier.size(60.dp), tint = Color(c)) }
-            Surface(modifier = Modifier.align(Alignment.BottomEnd).size(40.dp), shape = CircleShape, color = Color.DarkGray) { Icon(Icons.Default.Edit, null, modifier = Modifier.padding(8.dp), tint = Color.White) }
-        }
-        Spacer(Modifier.height(32.dp)); Text("NICKNAME", color = Color.Gray, fontSize = 12.sp); OutlinedTextField(n, { n = it }, modifier = Modifier.fillMaxWidth(0.8f).widthIn(max = 360.dp), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(c)))
-        Spacer(Modifier.height(32.dp)); Text("COLOR", color = Color.Gray, fontSize = 12.sp)
-        LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.height(110.dp).fillMaxWidth(0.75f).widthIn(max = 280.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(ColorPalette) { color -> Box(modifier = Modifier.size(45.dp).background(color, CircleShape).border(if (c == color.value.toLong().toInt()) 3.dp else 0.dp, Color.White, CircleShape).clickable { c = color.value.toLong().toInt() }) }
-        }
-        Spacer(Modifier.height(48.dp)); Button(onClick = { if (n.isNotBlank()) onSave(n, c) }, modifier = Modifier.height(56.dp).width(200.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(c), contentColor = CyberDark)) { Icon(Icons.Default.Save, null); Text("GUARDAR", fontWeight = FontWeight.Black) }
+fun ProfileScreen(
+    cn: String,
+    cc: Int,
+    ca: Bitmap?,
+    onSave: (String, Int) -> Unit,
+    onAvatarChange: (Bitmap?) -> Unit,
+    onTakeAvatar: () -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var name by remember(cn) { mutableStateOf(cn) }
+    var colorValue by remember(cc) { mutableStateOf(cc) }
+    val accent = Color(colorValue)
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { TeleoUtils.avatarFromUri(context, it) }?.let(onAvatarChange)
     }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) onTakeAvatar()
+    }
+    val openCamera = {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            onTakeAvatar()
+        } else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize().background(
+            Brush.radialGradient(
+                colors = listOf(accent.copy(alpha = 0.13f), CyberDark, Color(0xFF05070A)),
+                radius = 1200f
+            )
+        )
+    ) {
+        val compact = maxWidth < 760.dp
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 18.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack, modifier = Modifier.size(44.dp).background(Color.White.copy(alpha = 0.05f), CircleShape)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = Color.White.copy(alpha = 0.72f))
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("TU PERFIL", color = accent, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                    Text("Así te verán las personas cerca", color = Color.White.copy(alpha = 0.48f), fontSize = 12.sp)
+                }
+                Box(modifier = Modifier.size(8.dp).background(accent, CircleShape))
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(28.dp),
+                color = Color.White.copy(alpha = 0.035f),
+                border = BorderStroke(1.dp, accent.copy(alpha = 0.24f))
+            ) {
+                val contentModifier = Modifier.fillMaxSize().padding(if (compact) 18.dp else 28.dp)
+                if (compact) {
+                    Column(contentModifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+                        ProfileAvatarPanel(ca, accent, { galleryLauncher.launch("image/*") }, openCamera, { onAvatarChange(null) })
+                        Spacer(Modifier.height(24.dp))
+                        ProfileDetails(name, { if (it.length <= 24) name = it }, colorValue, { colorValue = it }, accent, { onSave(name.trim(), colorValue) })
+                    }
+                } else {
+                    Row(contentModifier, horizontalArrangement = Arrangement.spacedBy(34.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.weight(0.9f), contentAlignment = Alignment.Center) {
+                            ProfileAvatarPanel(ca, accent, { galleryLauncher.launch("image/*") }, openCamera, { onAvatarChange(null) })
+                        }
+                        Box(modifier = Modifier.width(1.dp).fillMaxHeight(0.78f).background(Color.White.copy(alpha = 0.08f)))
+                        Box(modifier = Modifier.weight(1.25f), contentAlignment = Alignment.Center) {
+                            ProfileDetails(name, { if (it.length <= 24) name = it }, colorValue, { colorValue = it }, accent, { onSave(name.trim(), colorValue) })
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileAvatarPanel(ca: Bitmap?, accent: Color, onGallery: () -> Unit, onCamera: () -> Unit, onRemove: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.size(176.dp).background(accent.copy(alpha = 0.08f), CircleShape).border(2.dp, accent.copy(alpha = 0.72f), CircleShape).padding(7.dp)) {
+                if (ca != null) {
+                    Image(ca.asImageBitmap(), "Foto de perfil", Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                } else {
+                    Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.035f), CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Person, null, modifier = Modifier.size(82.dp), tint = accent.copy(alpha = 0.72f))
+                    }
+                }
+            }
+            Box(modifier = Modifier.align(Alignment.BottomEnd).size(42.dp).background(accent, CircleShape).border(3.dp, CyberDark, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.AutoAwesome, null, tint = CyberDark, modifier = Modifier.size(20.dp))
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text("IMAGEN DE PERFIL", color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onCamera, border = BorderStroke(1.dp, accent.copy(alpha = 0.55f))) {
+                Icon(Icons.Default.PhotoCamera, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text("Cámara", color = Color.White)
+            }
+            OutlinedButton(onClick = onGallery, border = BorderStroke(1.dp, accent.copy(alpha = 0.55f))) {
+                Icon(Icons.Default.PhotoLibrary, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text("Galería", color = Color.White)
+            }
+        }
+        if (ca != null) TextButton(onClick = onRemove) { Text("Quitar imagen", color = Color.White.copy(alpha = 0.48f), fontSize = 12.sp) }
+    }
+}
+
+@Composable
+private fun ProfileDetails(name: String, onNameChange: (String) -> Unit, colorValue: Int, onColorChange: (Int) -> Unit, accent: Color, onSave: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp)) {
+        Text("NICKNAME", color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(7.dp))
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Default.AlternateEmail, null, tint = accent) },
+            supportingText = { Text("${name.length}/24", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
+            placeholder = { Text("Tu nombre visible") },
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                focusedBorderColor = accent, unfocusedBorderColor = Color.White.copy(alpha = 0.16f),
+                cursorColor = accent
+            )
+        )
+        Spacer(Modifier.height(18.dp))
+        Text("COLOR DE IDENTIDAD", color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
+            ColorPalette.forEach { color ->
+                val selected = colorValue == color.value.toLong().toInt()
+                Box(
+                    modifier = Modifier.size(if (selected) 40.dp else 34.dp).background(color, CircleShape)
+                        .border(if (selected) 3.dp else 1.dp, if (selected) Color.White else color.copy(alpha = 0.45f), CircleShape)
+                        .clickable { onColorChange(color.value.toLong().toInt()) },
+                    contentAlignment = Alignment.Center
+                ) { if (selected) Icon(Icons.Default.Check, null, tint = if (color.luminance() > 0.55f) CyberDark else Color.White, modifier = Modifier.size(18.dp)) }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = onSave,
+            enabled = name.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(54.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = if (accent.luminance() > 0.55f) CyberDark else Color.White)
+        ) {
+            Icon(Icons.Default.CheckCircle, null); Spacer(Modifier.width(9.dp)); Text("GUARDAR PERFIL", fontWeight = FontWeight.Black)
+        }
     }
 }
 
@@ -462,7 +642,18 @@ fun AvatarCameraScreen(onCaptured: (Bitmap) -> Unit, onBack: () -> Unit) {
         Box(modifier = Modifier.align(Alignment.Center).size(280.dp).border(2.dp, Color.White.copy(alpha = 0.5f), CircleShape))
         Row(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp), horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(64.dp).background(Color.White.copy(alpha = 0.1f), CircleShape)) { Icon(Icons.Default.Close, null, tint = Color.White) }
-            IconButton(onClick = { ic?.takePicture(ContextCompat.getMainExecutor(ctx), object : ImageCapture.OnImageCapturedCallback() { override fun onCaptureSuccess(image: ImageProxy) { val b = image.planes[0].buffer; val bytes = ByteArray(b.remaining()); b.get(bytes); val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size); val m = Math.min(bmp.width, bmp.height); val sq = Bitmap.createBitmap(bmp, (bmp.width - m) / 2, (bmp.height - m) / 2, m, m); onCaptured(Bitmap.createScaledBitmap(sq, 256, 256, true)); image.close() } }) }, modifier = Modifier.size(80.dp).background(Color.White, CircleShape).border(4.dp, CyberCyan, CircleShape)) { Icon(Icons.Default.Camera, null, modifier = Modifier.size(40.dp), tint = Color.Black) }
+            IconButton(onClick = { ic?.takePicture(ContextCompat.getMainExecutor(ctx), object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    try {
+                        val buffer = image.planes[0].buffer
+                        val bytes = ByteArray(buffer.remaining())
+                        buffer.get(bytes)
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { bitmap ->
+                            onCaptured(TeleoUtils.prepareAvatar(bitmap, image.imageInfo.rotationDegrees))
+                        }
+                    } finally { image.close() }
+                }
+            }) }, modifier = Modifier.size(80.dp).background(Color.White, CircleShape).border(4.dp, CyberCyan, CircleShape)) { Icon(Icons.Default.Camera, null, modifier = Modifier.size(40.dp), tint = Color.Black) }
         }
     }
 }
