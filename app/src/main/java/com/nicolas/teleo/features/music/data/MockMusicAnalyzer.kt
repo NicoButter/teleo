@@ -1,15 +1,19 @@
 package com.nicolas.teleo.features.music.data
 
-import com.nicolas.teleo.features.music.domain.LyricLine
 import com.nicolas.teleo.features.music.domain.MusicAnalysisProgress
 import com.nicolas.teleo.features.music.domain.MusicAnalysisStage
 import com.nicolas.teleo.features.music.domain.MusicAnalyzer
 import com.nicolas.teleo.features.music.domain.MusicBufferConfig
 import com.nicolas.teleo.features.music.domain.MusicEvent
 import com.nicolas.teleo.features.music.domain.MusicEventType
+import com.nicolas.teleo.features.music.domain.MusicFeatureFrame
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicTrack
+import com.nicolas.teleo.features.music.domain.TimedLyricLine
+import com.nicolas.teleo.features.music.domain.TimedLyricWord
 import kotlinx.coroutines.delay
+import kotlin.math.PI
+import kotlin.math.sin
 
 class MockMusicAnalyzer(
     private val bpm: Float = 112f,
@@ -49,9 +53,10 @@ class MockMusicAnalyzer(
             trackId = track.id,
             durationMs = duration,
             bpm = bpm,
-            analysisVersion = 1,
+            analysisVersion = 2,
             events = generateEvents(duration),
-            lyrics = generateDemoLyrics(duration)
+            lyrics = generateDemoLyrics(duration),
+            featureFrames = generateFeatureFrames(duration)
         )
     }
 
@@ -81,7 +86,8 @@ class MockMusicAnalyzer(
                 if ((beat / 4) % 2 == 0) "Melodía sube" else "Melodía baja"
             )
             if (beat % 16 == 0) {
-                events += MusicEvent(timestamp, 400, MusicEventType.SECTION_START, 0.9f, "Nueva sección")
+                val section = sectionAt(timestamp, durationMs)
+                events += MusicEvent(timestamp, 400, MusicEventType.SECTION_START, 0.9f, "Sección: $section")
             }
             beat++
             timestamp = beat * beatMs
@@ -97,23 +103,80 @@ class MockMusicAnalyzer(
         return events.sortedBy { it.timestampMs }
     }
 
-    private fun generateDemoLyrics(durationMs: Long): List<LyricLine> {
+    private fun generateDemoLyrics(durationMs: Long): List<TimedLyricLine> {
         val lines = listOf(
-            "La luz dibuja el ritmo",
-            "cada pulso encuentra una forma",
-            "el movimiento marca el camino",
-            "y la canción se vuelve imagen"
+            "Light draws the rhythm" to "La luz dibuja el ritmo",
+            "Every pulse finds a shape" to "Cada pulso encuentra una forma",
+            "Movement marks the way" to "El movimiento marca el camino",
+            "And the song becomes an image" to "Y la canción se vuelve imagen"
         )
-        val result = mutableListOf<LyricLine>()
+        val result = mutableListOf<TimedLyricLine>()
         var start = 4_000L
         var index = 0
         while (start < durationMs) {
             val end = minOf(start + 3_600L, durationMs)
-            result += LyricLine(start, end, lines[index % lines.size])
+            val (original, translation) = lines[index % lines.size]
+            val wordTexts = original.split(' ')
+            val wordDuration = ((end - start) / wordTexts.size).coerceAtLeast(1)
+            val words = wordTexts.mapIndexed { wordIndex, word ->
+                val wordStart = start + wordIndex * wordDuration
+                TimedLyricWord(word, wordStart, minOf(end, wordStart + wordDuration - 1))
+            }
+            result += TimedLyricLine(
+                id = "demo-$index-$start",
+                startMs = start,
+                endMs = end,
+                originalText = original,
+                sourceLanguage = "en",
+                translations = mapOf("es" to translation),
+                words = words
+            )
             start += 4_000L
             index++
         }
         return result
+    }
+
+    private fun generateFeatureFrames(durationMs: Long): List<MusicFeatureFrame> {
+        val beatMs = 60_000f / bpm
+        return buildList {
+            var timestamp = 0L
+            while (timestamp <= durationMs) {
+                val beatPhase = (timestamp % beatMs.toLong()) / beatMs
+                val slowWave = normalizedSine(timestamp / 7_000f)
+                val mediumWave = normalizedSine(timestamp / 2_300f + 0.7f)
+                val fastWave = normalizedSine(timestamp / 780f + 1.4f)
+                val section = sectionAt(timestamp, durationMs)
+                val chorusBoost = if (section == "chorus") 0.18f else 0f
+                val vocal = if ((timestamp / 4_000) % 4 in 1L..2L) 0.76f else 0.18f
+                add(
+                    MusicFeatureFrame(
+                        timestampMs = timestamp,
+                        beatPhase = beatPhase.coerceIn(0f, 1f),
+                        beatStrength = ((1f - beatPhase) * 0.82f + chorusBoost).coerceIn(0f, 1f),
+                        lowEnergy = (0.35f + slowWave * 0.45f + chorusBoost).coerceIn(0f, 1f),
+                        midEnergy = (0.3f + mediumWave * 0.5f + chorusBoost).coerceIn(0f, 1f),
+                        highEnergy = (0.18f + fastWave * 0.48f + chorusBoost).coerceIn(0f, 1f),
+                        vocalPresence = vocal,
+                        melodicPitchNormalized = (0.2f + mediumWave * 0.65f).coerceIn(0f, 1f),
+                        spectralBrightness = (0.22f + fastWave * 0.58f).coerceIn(0f, 1f),
+                        overallEnergy = (0.3f + (slowWave + mediumWave) * 0.23f + chorusBoost).coerceIn(0f, 1f),
+                        sectionId = section
+                    )
+                )
+                timestamp += 250L
+            }
+        }
+    }
+
+    private fun normalizedSine(value: Float): Float = ((sin(value * PI).toFloat() + 1f) / 2f).coerceIn(0f, 1f)
+
+    private fun sectionAt(timestampMs: Long, durationMs: Long): String = when {
+        timestampMs < 8_000 -> "intro"
+        timestampMs >= durationMs - 8_000 -> "outro"
+        timestampMs % 48_000 < 16_000 -> "verse"
+        timestampMs % 48_000 < 32_000 -> "chorus"
+        else -> "bridge"
     }
 
     private data class ProgressStep(

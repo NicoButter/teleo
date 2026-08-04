@@ -14,6 +14,10 @@ import com.nicolas.teleo.features.music.domain.MusicExperienceState
 import com.nicolas.teleo.features.music.domain.MusicPlaybackState
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicTrack
+import com.nicolas.teleo.features.music.domain.MusicVisualSettings
+import com.nicolas.teleo.features.music.domain.LyricsDisplayMode
+import com.nicolas.teleo.features.music.domain.VisualPreset
+import com.nicolas.teleo.features.music.domain.VisualQuality
 import com.nicolas.teleo.features.music.domain.adjustedTimelinePosition
 import com.nicolas.teleo.features.music.domain.eventsBetween
 import com.nicolas.teleo.features.music.haptics.AndroidHapticMusicEngine
@@ -42,6 +46,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     private var currentTrack: MusicTrack? = null
     private var currentTimeline: MusicTimeline? = null
     private var hapticSettings = HapticSettings()
+    private var visualSettings = MusicVisualSettings()
     private var bufferedUntilMs = 0L
     private var lastHapticPositionMs = 0L
     private var syncOffsetMs = 0
@@ -70,6 +75,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
         preparationJob = viewModelScope.launch {
             try {
                 val cached = repository.findByTrackHash(track.id)
+                    ?.takeIf { it.analysisVersion >= 2 && it.featureFrames.isNotEmpty() }
                 val timeline = cached ?: analyzer.analyze(track) { progress ->
                     bufferedUntilMs = progress.bufferedUntilMs
                     mutableState.value = MusicExperienceState.Analyzing(track, progress)
@@ -117,6 +123,8 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
 
     fun restart() = seekTo(0)
 
+    fun playbackPositionNow(): Long = playbackController.currentPositionMs()
+
     fun setHapticsEnabled(enabled: Boolean) {
         updateHaptics(hapticSettings.copy(enabled = enabled))
     }
@@ -124,6 +132,29 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     fun setHapticIntensity(intensity: HapticIntensity) {
         updateHaptics(hapticSettings.copy(intensityMultiplier = intensity.multiplier))
     }
+
+    fun setVisualPreset(preset: VisualPreset) = updateVisuals(visualSettings.copy(preset = preset))
+
+    fun setVisualQuality(quality: VisualQuality) = updateVisuals(visualSettings.copy(quality = quality))
+
+    fun setReducedMotion(enabled: Boolean) = updateVisuals(
+        visualSettings.copy(
+            reducedMotion = enabled,
+            motionIntensity = if (enabled) 0.25f else 1f,
+            particleIntensity = if (enabled) minOf(visualSettings.particleIntensity, 0.55f) else 1f
+        )
+    )
+
+    fun setFlashesEnabled(enabled: Boolean) = updateVisuals(visualSettings.copy(flashesEnabled = enabled))
+
+    fun setStableLyrics(enabled: Boolean) = updateVisuals(visualSettings.copy(stableLyrics = enabled))
+
+    fun setIntenseVisualWarningEnabled(enabled: Boolean) =
+        updateVisuals(visualSettings.copy(intenseVisualWarningEnabled = enabled))
+
+    fun setLyricsDisplayMode(mode: LyricsDisplayMode) = updateVisuals(visualSettings.copy(lyricsDisplayMode = mode))
+
+    fun setLyricsTextScale(scale: Float) = updateVisuals(visualSettings.copy(lyricsTextScale = scale.coerceIn(0.8f, 1.5f)))
 
     fun setSyncOffset(offsetMs: Int) {
         syncOffsetMs = offsetMs.coerceIn(-250, 250)
@@ -211,6 +242,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
             bufferedUntilMs = bufferedUntilMs,
             isPlaying = playback.isPlaying,
             hapticSettings = hapticSettings,
+            visualSettings = visualSettings,
             syncOffsetMs = syncOffsetMs,
             isRecoveringBuffer = bufferedUntilMs < timeline.durationMs && remainingBuffer < MusicBufferConfig.MINIMUM_SAFE_BUFFER_MS
         )
@@ -219,6 +251,11 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     private fun updateHaptics(settings: HapticSettings) {
         hapticSettings = settings
         hapticEngine.updateSettings(settings)
+        refreshPlayingState(playbackController.playbackState.value)
+    }
+
+    private fun updateVisuals(settings: MusicVisualSettings) {
+        visualSettings = settings
         refreshPlayingState(playbackController.playbackState.value)
     }
 

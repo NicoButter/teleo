@@ -42,24 +42,14 @@ data class MusicEvent(
     }
 }
 
-data class LyricLine(
-    val startMs: Long,
-    val endMs: Long,
-    val text: String
-) {
-    init {
-        require(startMs >= 0) { "Lyric start cannot be negative" }
-        require(endMs >= startMs) { "Lyric end cannot precede its start" }
-    }
-}
-
 data class MusicTimeline(
     val trackId: String,
     val durationMs: Long,
     val bpm: Float?,
     val analysisVersion: Int,
     val events: List<MusicEvent>,
-    val lyrics: List<LyricLine>
+    val lyrics: List<TimedLyricLine>,
+    val featureFrames: List<MusicFeatureFrame> = emptyList()
 ) {
     init {
         require(trackId.isNotBlank()) { "Timeline track id cannot be blank" }
@@ -71,6 +61,9 @@ data class MusicTimeline(
         }
         require(lyrics.zipWithNext().all { (a, b) -> a.startMs <= b.startMs }) {
             "Timeline lyrics must be ordered chronologically"
+        }
+        require(featureFrames.zipWithNext().all { (a, b) -> a.timestampMs <= b.timestampMs }) {
+            "Music feature frames must be ordered chronologically"
         }
     }
 }
@@ -143,6 +136,7 @@ sealed interface MusicExperienceState {
         val bufferedUntilMs: Long,
         val isPlaying: Boolean,
         val hapticSettings: HapticSettings,
+        val visualSettings: MusicVisualSettings,
         val syncOffsetMs: Int,
         val isRecoveringBuffer: Boolean
     ) : MusicExperienceState

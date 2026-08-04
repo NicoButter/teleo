@@ -4,7 +4,9 @@ import android.content.Context
 import com.nicolas.teleo.features.music.domain.LyricLine
 import com.nicolas.teleo.features.music.domain.MusicEvent
 import com.nicolas.teleo.features.music.domain.MusicEventType
+import com.nicolas.teleo.features.music.domain.MusicFeatureFrame
 import com.nicolas.teleo.features.music.domain.MusicTimeline
+import com.nicolas.teleo.features.music.domain.TimedLyricWord
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -73,9 +75,41 @@ object MusicTimelineJson {
         put("lyrics", JSONArray().apply {
             timeline.lyrics.forEach { line ->
                 put(JSONObject().apply {
+                    put("id", line.id)
                     put("startMs", line.startMs)
                     put("endMs", line.endMs)
-                    put("text", line.text)
+                    put("originalText", line.originalText)
+                    put("sourceLanguage", line.sourceLanguage ?: JSONObject.NULL)
+                    put("translations", JSONObject().apply {
+                        line.translations.forEach { (language, text) -> put(language, text) }
+                    })
+                    put("words", JSONArray().apply {
+                        line.words.forEach { word ->
+                            put(JSONObject().apply {
+                                put("text", word.text)
+                                put("startMs", word.startMs)
+                                put("endMs", word.endMs)
+                            })
+                        }
+                    })
+                    put("isCustomTranslation", line.isCustomTranslation)
+                })
+            }
+        })
+        put("featureFrames", JSONArray().apply {
+            timeline.featureFrames.forEach { frame ->
+                put(JSONObject().apply {
+                    put("timestampMs", frame.timestampMs)
+                    put("beatPhase", frame.beatPhase.toDouble())
+                    put("beatStrength", frame.beatStrength.toDouble())
+                    put("lowEnergy", frame.lowEnergy.toDouble())
+                    put("midEnergy", frame.midEnergy.toDouble())
+                    put("highEnergy", frame.highEnergy.toDouble())
+                    put("vocalPresence", frame.vocalPresence.toDouble())
+                    put("melodicPitchNormalized", frame.melodicPitchNormalized?.toDouble() ?: JSONObject.NULL)
+                    put("spectralBrightness", frame.spectralBrightness.toDouble())
+                    put("overallEnergy", frame.overallEnergy.toDouble())
+                    put("sectionId", frame.sectionId ?: JSONObject.NULL)
                 })
             }
         })
@@ -102,7 +136,52 @@ object MusicTimelineJson {
         val lyrics = buildList {
             for (index in 0 until lyricArray.length()) {
                 val item = lyricArray.getJSONObject(index)
-                add(LyricLine(item.getLong("startMs"), item.getLong("endMs"), item.getString("text")))
+                val translationsObject = item.optJSONObject("translations")
+                val translations = buildMap {
+                    translationsObject?.keys()?.forEach { language -> put(language, translationsObject.getString(language)) }
+                }
+                val wordsArray = item.optJSONArray("words")
+                val words = buildList {
+                    if (wordsArray != null) for (wordIndex in 0 until wordsArray.length()) {
+                        val word = wordsArray.getJSONObject(wordIndex)
+                        add(TimedLyricWord(word.getString("text"), word.getLong("startMs"), word.getLong("endMs")))
+                    }
+                }
+                val startMs = item.getLong("startMs")
+                val endMs = item.getLong("endMs")
+                add(
+                    LyricLine(
+                        id = item.optString("id", "line-$startMs-$endMs"),
+                        startMs = startMs,
+                        endMs = endMs,
+                        originalText = if (item.has("originalText")) item.getString("originalText") else item.getString("text"),
+                        sourceLanguage = item.optString("sourceLanguage").takeIf { !item.isNull("sourceLanguage") && it.isNotBlank() },
+                        translations = translations,
+                        words = words,
+                        isCustomTranslation = item.optBoolean("isCustomTranslation", false)
+                    )
+                )
+            }
+        }
+        val frameArray = root.optJSONArray("featureFrames")
+        val featureFrames = buildList {
+            if (frameArray != null) for (index in 0 until frameArray.length()) {
+                val item = frameArray.getJSONObject(index)
+                add(
+                    MusicFeatureFrame(
+                        timestampMs = item.getLong("timestampMs"),
+                        beatPhase = item.getDouble("beatPhase").toFloat(),
+                        beatStrength = item.getDouble("beatStrength").toFloat(),
+                        lowEnergy = item.getDouble("lowEnergy").toFloat(),
+                        midEnergy = item.getDouble("midEnergy").toFloat(),
+                        highEnergy = item.getDouble("highEnergy").toFloat(),
+                        vocalPresence = item.getDouble("vocalPresence").toFloat(),
+                        melodicPitchNormalized = if (item.isNull("melodicPitchNormalized")) null else item.getDouble("melodicPitchNormalized").toFloat(),
+                        spectralBrightness = item.getDouble("spectralBrightness").toFloat(),
+                        overallEnergy = item.getDouble("overallEnergy").toFloat(),
+                        sectionId = item.optString("sectionId").takeIf { !item.isNull("sectionId") && it.isNotBlank() }
+                    )
+                )
             }
         }
         return MusicTimeline(
@@ -111,7 +190,8 @@ object MusicTimelineJson {
             bpm = if (root.isNull("bpm")) null else root.getDouble("bpm").toFloat(),
             analysisVersion = root.getInt("analysisVersion"),
             events = events,
-            lyrics = lyrics
+            lyrics = lyrics,
+            featureFrames = featureFrames
         )
     }
 }

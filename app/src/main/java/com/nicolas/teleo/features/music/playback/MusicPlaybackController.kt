@@ -27,6 +27,7 @@ interface MusicPlaybackController {
     fun play()
     fun pause()
     fun seekTo(positionMs: Long)
+    fun currentPositionMs(): Long
     fun release()
 }
 
@@ -70,6 +71,8 @@ class ExoPlayerMusicPlaybackController(context: Context) : MusicPlaybackControll
         player.seekTo(positionMs.coerceAtLeast(0))
         publishState()
     }
+
+    override fun currentPositionMs(): Long = player.currentPosition.coerceAtLeast(0)
 
     override fun release() {
         positionJob?.cancel()

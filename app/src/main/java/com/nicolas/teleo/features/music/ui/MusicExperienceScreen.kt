@@ -59,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -67,6 +69,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -76,14 +81,21 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nicolas.teleo.features.music.MusicExperienceViewModel
 import com.nicolas.teleo.features.music.data.MusicTrackResolver
 import com.nicolas.teleo.features.music.domain.HapticIntensity
+import com.nicolas.teleo.features.music.domain.LyricsDisplayMode
 import com.nicolas.teleo.features.music.domain.MusicAnalysisProgress
 import com.nicolas.teleo.features.music.domain.MusicEvent
 import com.nicolas.teleo.features.music.domain.MusicEventType
 import com.nicolas.teleo.features.music.domain.MusicExperienceState
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicTrack
+import com.nicolas.teleo.features.music.domain.MusicVisualSettings
+import com.nicolas.teleo.features.music.domain.TimedLyricLine
+import com.nicolas.teleo.features.music.domain.VisualPreset
+import com.nicolas.teleo.features.music.domain.VisualQuality
+import com.nicolas.teleo.features.music.domain.activeWordAt
 import com.nicolas.teleo.features.music.domain.activeLyricAt
 import com.nicolas.teleo.features.music.domain.adjustedTimelinePosition
+import com.nicolas.teleo.features.music.visual.LinearMusicFeatureInterpolator
 import java.util.Locale
 
 private val MusicDark = Color(0xFF0A0E14)
@@ -181,7 +193,16 @@ fun MusicExperienceRoute(
                     selectedIntensity = it
                     viewModel.setHapticIntensity(it)
                 },
-                onSyncOffsetChanged = viewModel::setSyncOffset
+                onSyncOffsetChanged = viewModel::setSyncOffset,
+                playbackPositionProvider = viewModel::playbackPositionNow,
+                onVisualPresetChanged = viewModel::setVisualPreset,
+                onVisualQualityChanged = viewModel::setVisualQuality,
+                onReducedMotionChanged = viewModel::setReducedMotion,
+                onFlashesChanged = viewModel::setFlashesEnabled,
+                onStableLyricsChanged = viewModel::setStableLyrics,
+                onIntenseVisualWarningChanged = viewModel::setIntenseVisualWarningEnabled,
+                onLyricsDisplayModeChanged = viewModel::setLyricsDisplayMode,
+                onLyricsTextScaleChanged = viewModel::setLyricsTextScale
             )
             is MusicExperienceState.Error -> MusicErrorScreen(
                 message = current.message,
@@ -349,10 +370,18 @@ fun MusicPlaybackScreen(
     onSeek: (Long) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
     onIntensityChanged: (HapticIntensity) -> Unit,
-    onSyncOffsetChanged: (Int) -> Unit
+    onSyncOffsetChanged: (Int) -> Unit,
+    playbackPositionProvider: () -> Long = { state.playbackPositionMs },
+    onVisualPresetChanged: (VisualPreset) -> Unit = {},
+    onVisualQualityChanged: (VisualQuality) -> Unit = {},
+    onReducedMotionChanged: (Boolean) -> Unit = {},
+    onFlashesChanged: (Boolean) -> Unit = {},
+    onStableLyricsChanged: (Boolean) -> Unit = {},
+    onIntenseVisualWarningChanged: (Boolean) -> Unit = {},
+    onLyricsDisplayModeChanged: (LyricsDisplayMode) -> Unit = {},
+    onLyricsTextScaleChanged: (Float) -> Unit = {}
 ) {
     val adjustedPosition = adjustedTimelinePosition(state.playbackPositionMs, state.syncOffsetMs)
-    val lyric = state.timeline.activeLyricAt(adjustedPosition)
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp).testTag("music_playback")) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
@@ -364,26 +393,12 @@ fun MusicPlaybackScreen(
             }
             BufferBadge(state.bufferedUntilMs, state.timeline.durationMs, state.isRecoveringBuffer)
         }
-        Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp).padding(vertical = 5.dp),
-            color = Color.White.copy(alpha = 0.045f),
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, if (lyric == null) Color.White.copy(alpha = 0.1f) else MusicMagenta.copy(alpha = 0.35f))
-        ) {
-            Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
-                Text(
-                    lyric?.text ?: "Esta parte no tiene letra",
-                    color = if (lyric == null) Color.White.copy(alpha = 0.42f) else Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = if (lyric == null) FontWeight.Normal else FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
-                )
-            }
-        }
-        MusicLanes(
+        MusicVisualStage(
             timeline = state.timeline,
             positionMs = adjustedPosition,
+            isPlaying = state.isPlaying,
+            playbackPositionProvider = playbackPositionProvider,
+            settings = state.visualSettings,
             modifier = Modifier.weight(1f).fillMaxWidth()
         )
         if (state.isRecoveringBuffer) {
@@ -440,6 +455,220 @@ fun MusicPlaybackScreen(
                 Text("+50")
             }
         }
+        VisualControls(
+            settings = state.visualSettings,
+            onPresetChanged = onVisualPresetChanged,
+            onQualityChanged = onVisualQualityChanged,
+            onReducedMotionChanged = onReducedMotionChanged,
+            onFlashesChanged = onFlashesChanged,
+            onStableLyricsChanged = onStableLyricsChanged,
+            onIntenseVisualWarningChanged = onIntenseVisualWarningChanged,
+            onLyricsModeChanged = onLyricsDisplayModeChanged,
+            onLyricsTextScaleChanged = onLyricsTextScaleChanged
+        )
+    }
+}
+
+@Composable
+private fun MusicVisualStage(
+    timeline: MusicTimeline,
+    positionMs: Long,
+    isPlaying: Boolean,
+    playbackPositionProvider: () -> Long,
+    settings: MusicVisualSettings,
+    modifier: Modifier = Modifier
+) {
+    val lyric = timeline.activeLyricAt(positionMs)
+    val interpolator = remember { LinearMusicFeatureInterpolator() }
+    val features = interpolator.interpolate(timeline.featureFrames, positionMs)
+    Box(
+        modifier = modifier.padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp))
+            .border(1.dp, MusicCyan.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+    ) {
+        if (settings.preset == VisualPreset.LANES) {
+            Column(Modifier.fillMaxSize().background(Color(0xFF050810)).padding(8.dp)) {
+                LyricsOverlay(lyric, positionMs, features.vocalPresence, settings, Modifier.fillMaxWidth())
+                MusicLanes(timeline, positionMs, Modifier.weight(1f).fillMaxWidth())
+            }
+        } else {
+            GenerativeMusicCanvas(
+                timeline = timeline,
+                isPlaying = isPlaying,
+                playbackPositionProvider = playbackPositionProvider,
+                settings = settings,
+                modifier = Modifier.fillMaxSize().testTag("music_generative_canvas")
+            )
+            LyricsOverlay(
+                lyric = lyric,
+                positionMs = positionMs,
+                vocalPresence = features.vocalPresence,
+                settings = settings,
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(0.88f).padding(top = 12.dp)
+            )
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                color = MusicDark.copy(alpha = 0.72f),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, MusicTeal.copy(alpha = 0.4f))
+            ) {
+                Text(
+                    "SECCIÓN · ${features.sectionId?.uppercase() ?: "—"}",
+                    color = MusicTeal,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                )
+            }
+            if (settings.intenseVisualWarningEnabled && settings.preset == VisualPreset.PARTICLES && !settings.reducedMotion) {
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
+                    color = MusicYellow.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MusicYellow.copy(alpha = 0.45f))
+                ) {
+                    Text(
+                        "MOVIMIENTO INTENSO · podés activar movimiento reducido",
+                        color = MusicYellow,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LyricsOverlay(
+    lyric: TimedLyricLine?,
+    positionMs: Long,
+    vocalPresence: Float,
+    settings: MusicVisualSettings,
+    modifier: Modifier = Modifier
+) {
+    if (settings.lyricsDisplayMode == LyricsDisplayMode.HIDDEN) return
+    val scale = if (settings.stableLyrics || settings.reducedMotion) 1f else 1f + vocalPresence * 0.035f
+    Surface(
+        modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale },
+        color = MusicDark.copy(alpha = 0.68f),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, if (lyric == null) Color.White.copy(alpha = 0.12f) else MusicMagenta.copy(alpha = 0.42f))
+    ) {
+        Column(
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (lyric == null) {
+                Text("Esta parte no tiene letra", color = Color.White.copy(alpha = 0.5f), textAlign = TextAlign.Center)
+            } else {
+                if (settings.lyricsDisplayMode != LyricsDisplayMode.TRANSLATED) {
+                    Text(
+                        highlightedOriginal(lyric, positionMs),
+                        color = Color.White,
+                        fontSize = (19f * settings.lyricsTextScale).sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                if (settings.lyricsDisplayMode != LyricsDisplayMode.ORIGINAL) {
+                    val translated = lyric.translations[settings.targetTranslationLanguage]
+                    Text(
+                        translated ?: "Traducción no disponible",
+                        color = if (translated == null) Color.White.copy(alpha = 0.48f) else MusicTeal,
+                        fontSize = (15f * settings.lyricsTextScale).sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun highlightedOriginal(lyric: TimedLyricLine, positionMs: Long) = buildAnnotatedString {
+    val activeWord = lyric.activeWordAt(positionMs)
+    if (lyric.words.isEmpty()) {
+        append(lyric.originalText)
+    } else {
+        lyric.words.forEachIndexed { index, word ->
+            if (index > 0) append(' ')
+            withStyle(
+                SpanStyle(
+                    color = if (word == activeWord) MusicYellow else Color.White,
+                    fontWeight = if (word == activeWord) FontWeight.Black else FontWeight.Bold
+                )
+            ) { append(word.text) }
+        }
+    }
+}
+
+@Composable
+private fun VisualControls(
+    settings: MusicVisualSettings,
+    onPresetChanged: (VisualPreset) -> Unit,
+    onQualityChanged: (VisualQuality) -> Unit,
+    onReducedMotionChanged: (Boolean) -> Unit,
+    onFlashesChanged: (Boolean) -> Unit,
+    onStableLyricsChanged: (Boolean) -> Unit,
+    onIntenseVisualWarningChanged: (Boolean) -> Unit,
+    onLyricsModeChanged: (LyricsDisplayMode) -> Unit,
+    onLyricsTextScaleChanged: (Float) -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(top = 3.dp)) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("ESCENA", color = MusicCyan, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            listOf(VisualPreset.PARTICLES, VisualPreset.LANES, VisualPreset.MINIMAL).forEach { preset ->
+                FilterChip(
+                    selected = settings.preset == preset,
+                    onClick = { onPresetChanged(preset) },
+                    label = { Text(preset.label, fontSize = 10.sp) },
+                    modifier = Modifier.testTag("music_preset_${preset.name.lowercase()}")
+                )
+            }
+            Text("CALIDAD", color = MusicCyan, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            VisualQuality.entries.forEach { quality ->
+                FilterChip(
+                    selected = settings.quality == quality,
+                    onClick = { onQualityChanged(quality) },
+                    label = { Text(quality.label, fontSize = 10.sp) }
+                )
+            }
+            AccessibilitySwitch("Movimiento reducido", settings.reducedMotion, onReducedMotionChanged, "music_reduced_motion")
+            AccessibilitySwitch("Destellos", settings.flashesEnabled, onFlashesChanged, "music_flashes")
+            AccessibilitySwitch("Letra estable", settings.stableLyrics, onStableLyricsChanged, "music_stable_lyrics")
+            AccessibilitySwitch("Aviso intenso", settings.intenseVisualWarningEnabled, onIntenseVisualWarningChanged, "music_visual_warning")
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("LETRA", color = MusicMagenta, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            LyricsDisplayMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = settings.lyricsDisplayMode == mode,
+                    onClick = { onLyricsModeChanged(mode) },
+                    label = { Text(mode.label, fontSize = 10.sp) },
+                    modifier = Modifier.testTag("music_lyrics_${mode.name.lowercase()}")
+                )
+            }
+            Text("Tamaño", color = Color.White.copy(alpha = 0.68f), fontSize = 10.sp)
+            OutlinedButton(onClick = { onLyricsTextScaleChanged(settings.lyricsTextScale - 0.1f) }, enabled = settings.lyricsTextScale > 0.8f) { Text("A−") }
+            OutlinedButton(onClick = { onLyricsTextScaleChanged(settings.lyricsTextScale + 0.1f) }, enabled = settings.lyricsTextScale < 1.5f) { Text("A+") }
+        }
+    }
+}
+
+@Composable
+private fun AccessibilitySwitch(label: String, checked: Boolean, onChanged: (Boolean) -> Unit, tag: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color.White.copy(alpha = 0.72f), fontSize = 10.sp)
+        Switch(checked, onChanged, modifier = Modifier.testTag(tag).semantics { contentDescription = label })
     }
 }
 

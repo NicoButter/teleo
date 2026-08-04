@@ -13,6 +13,9 @@ import com.nicolas.teleo.features.music.domain.MusicAnalysisStage
 import com.nicolas.teleo.features.music.domain.MusicExperienceState
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicTrack
+import com.nicolas.teleo.features.music.domain.MusicVisualSettings
+import com.nicolas.teleo.features.music.domain.LyricsDisplayMode
+import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.ui.MusicPlaybackScreen
 import com.nicolas.teleo.features.music.ui.MusicPreparationScreen
 import com.nicolas.teleo.features.music.ui.MusicSelectionScreen
@@ -78,15 +81,58 @@ class MusicExperienceScreenTest {
         assertTrue(!enabled)
     }
 
+    @Test
+    fun visualPresetCanSwitchToLanes() {
+        var preset = VisualPreset.PARTICLES
+        composeRule.setContent {
+            MaterialTheme { PlaybackScreenForTest(onVisualPresetChanged = { preset = it }) }
+        }
+        composeRule.onNodeWithTag("music_preset_lanes").performClick()
+        assertTrue(preset == VisualPreset.LANES)
+    }
+
+    @Test
+    fun reducedMotionCanBeEnabled() {
+        var enabled = false
+        composeRule.setContent {
+            MaterialTheme { PlaybackScreenForTest(onReducedMotionChanged = { enabled = it }) }
+        }
+        composeRule.onNodeWithTag("music_reduced_motion").performClick()
+        assertTrue(enabled)
+    }
+
+    @Test
+    fun translatedLyricsModeCanBeSelected() {
+        var mode = LyricsDisplayMode.ORIGINAL
+        composeRule.setContent {
+            MaterialTheme { PlaybackScreenForTest(onLyricsModeChanged = { mode = it }) }
+        }
+        composeRule.onNodeWithTag("music_lyrics_translated").performClick()
+        assertTrue(mode == LyricsDisplayMode.TRANSLATED)
+    }
+
     @androidx.compose.runtime.Composable
     private fun PlaybackScreenForTest(
         onTogglePlay: () -> Unit = {},
-        onHapticsChanged: (Boolean) -> Unit = {}
+        onHapticsChanged: (Boolean) -> Unit = {},
+        onVisualPresetChanged: (VisualPreset) -> Unit = {},
+        onReducedMotionChanged: (Boolean) -> Unit = {},
+        onLyricsModeChanged: (LyricsDisplayMode) -> Unit = {}
     ) {
         val track = MusicTrack("id", "Demo", null, "content://demo", 20_000)
         val timeline = MusicTimeline("id", 20_000, 120f, 1, emptyList(), emptyList())
         MusicPlaybackScreen(
-            state = MusicExperienceState.Playing(track, timeline, 0, 10_000, false, HapticSettings(), 0, false),
+            state = MusicExperienceState.Playing(
+                track = track,
+                timeline = timeline,
+                playbackPositionMs = 0,
+                bufferedUntilMs = 10_000,
+                isPlaying = false,
+                hapticSettings = HapticSettings(),
+                visualSettings = MusicVisualSettings(),
+                syncOffsetMs = 0,
+                isRecoveringBuffer = false
+            ),
             selectedIntensity = HapticIntensity.MEDIUM,
             onBack = {},
             onTogglePlay = onTogglePlay,
@@ -94,7 +140,10 @@ class MusicExperienceScreenTest {
             onSeek = {},
             onHapticsChanged = onHapticsChanged,
             onIntensityChanged = {},
-            onSyncOffsetChanged = {}
+            onSyncOffsetChanged = {},
+            onVisualPresetChanged = onVisualPresetChanged,
+            onReducedMotionChanged = onReducedMotionChanged,
+            onLyricsDisplayModeChanged = onLyricsModeChanged
         )
     }
 }

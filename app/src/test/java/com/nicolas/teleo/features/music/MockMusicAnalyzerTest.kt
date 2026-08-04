@@ -13,14 +13,14 @@ class MockMusicAnalyzerTest {
     @Test
     fun `mock analyzer generates ordered multi-lane timeline and progress`() = runBlocking {
         val progressStages = mutableListOf<MusicAnalysisStage>()
-        val track = MusicTrack("id", "Demo", null, "content://demo", 20_000)
+        val track = MusicTrack("id", "Demo", null, "content://demo", 60_000)
         val timeline = MockMusicAnalyzer(bpm = 120f, simulatedStageDelayMs = 0).analyze(track) {
             progressStages += it.stage
         }
 
         assertEquals(MusicAnalysisStage.READY, progressStages.last())
         assertEquals(120f, timeline.bpm)
-        assertEquals(20_000, timeline.durationMs)
+        assertEquals(60_000, timeline.durationMs)
         assertTrue(timeline.events.zipWithNext().all { (a, b) -> a.timestampMs <= b.timestampMs })
         assertTrue(timeline.events.any { it.type == MusicEventType.KICK })
         assertTrue(timeline.events.any { it.type == MusicEventType.SNARE })
@@ -28,5 +28,8 @@ class MockMusicAnalyzerTest {
         assertTrue(timeline.events.any { it.type == MusicEventType.VOCAL_START })
         assertTrue(timeline.events.any { it.type == MusicEventType.MELODY_UP })
         assertTrue(timeline.lyrics.isNotEmpty())
+        assertTrue(timeline.featureFrames.isNotEmpty())
+        assertTrue(timeline.featureFrames.any { it.sectionId == "chorus" })
+        assertTrue(timeline.lyrics.first().translations.containsKey("es"))
     }
 }
