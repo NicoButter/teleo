@@ -40,11 +40,20 @@ interface MusicFeatureInterpolator {
 }
 
 enum class VisualPreset(val label: String) {
+    SYNESTHETIC("Sinestesia"),
     PARTICLES("Partículas"),
     WAVES("Ondas"),
     LANES("Carriles"),
     MINIMAL("Minimal"),
     IMMERSIVE("Inmersivo")
+}
+
+enum class VisualInstrument(val label: String) {
+    RHYTHM("Ritmo"),
+    VOICE("Voz"),
+    BASS("Bajo"),
+    GUITAR("Guitarra"),
+    PIANO("Piano")
 }
 
 enum class VisualQuality(val label: String, val particleLimit: Int) {
@@ -62,7 +71,7 @@ enum class LyricsDisplayMode(val label: String) {
 }
 
 data class MusicVisualSettings(
-    val preset: VisualPreset = VisualPreset.PARTICLES,
+    val preset: VisualPreset = VisualPreset.SYNESTHETIC,
     val quality: VisualQuality = VisualQuality.AUTO,
     val particleIntensity: Float = 1f,
     val motionIntensity: Float = 1f,
@@ -73,6 +82,8 @@ data class MusicVisualSettings(
     val stableLyrics: Boolean = false,
     val reducedMotion: Boolean = false,
     val intenseVisualWarningEnabled: Boolean = true,
+    val particlesEnabled: Boolean = true,
+    val visibleInstruments: Set<VisualInstrument> = VisualInstrument.entries.toSet(),
     val lyricsTextScale: Float = 1f
 ) {
     init {

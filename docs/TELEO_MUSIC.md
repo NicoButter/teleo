@@ -8,7 +8,7 @@ La experiencia no interactúa con implantes cocleares, no programa dispositivos 
 
 ## Arquitectura
 
-Teleo es hoy una aplicación de actividad única, Compose y navegación manual con `Screen`. Para respetar ese diseño, la entrada a Música se agregó al mismo flujo, pero toda la implementación nueva vive bajo `com.nicolas.teleo.features.music`:
+Teleo utiliza Compose y navegación manual con `Screen`. Las funciones históricas permanecen en `MainActivity` y conservan su diseño horizontal. Teleo Música abre `MusicActivity`, una actividad interna dedicada y bloqueada en retrato para ofrecer una escena vertical más alta sin rotar ni reiniciar las demás experiencias. Toda la implementación nueva vive bajo `com.nicolas.teleo.features.music`:
 
 - `domain`: modelos validados, contratos y lógica de consulta temporal.
 - `data`: analizador simulado, resolución de metadatos del URI, JSON y repositorio de timelines.
@@ -93,11 +93,26 @@ Los límites son 80 en calidad baja, 180 en media y 350 en alta. `AUTO` comienza
 - Voz: aura de partículas alrededor de la zona tipográfica.
 - Melodía: trayectoria que cambia también en altura, no solamente en color.
 
+### Lenguaje sinestésico por instrumento
+
+El preset artístico principal es `SYNESTHETIC`. La composición vertical utiliza posiciones que no cambian entre canciones para que el lenguaje pueda aprenderse:
+
+- voz: forma orgánica blanda en el centro superior, deformada por presencia vocal;
+- bombo: pulso circular en el centro inferior;
+- redoblante: línea vertical que desciende desde la zona superior y se fragmenta al impactar;
+- hi-hat: chispa cruciforme breve en la periferia superior, desactivable;
+- bajo: cuerda/onda gruesa y lenta en la zona inferior;
+- guitarra: cuerda fina de vibración rápida en la zona media;
+- piano: línea segmentada en ocho rangos en la parte superior, con una activación cuya posición representa el tono.
+
+La forma, posición, grosor y velocidad identifican cada instrumento incluso sin color. Como el analizador todavía no separa guitarra y piano, ambos se alimentan provisionalmente de la característica melódica simulada, aunque pueden ocultarse de manera independiente.
+
 La semilla combina hash de canción, versión de análisis, preset, timestamp y tipo de evento. Dos motores con la misma entrada producen la misma composición. Un seek reconstruye eventos recientes con esa misma semilla.
 
 ### Presets
 
-- `PARTICLES`: escena generativa completa con partículas, ondas y foco de pulso.
+- `SYNESTHETIC`: escena artística principal con identidad espacial propia para voz, ritmo, bajo, guitarra y piano.
+- `PARTICLES`: motor de partículas disponible internamente para experimentación.
 - `LANES`: conserva los cuatro carriles accesibles del prototipo.
 - `MINIMAL`: fondo, una onda y pulso con movimiento reducido.
 - `WAVES` e `IMMERSIVE`: contratos preparados para escenas futuras; todavía no aparecen como opciones públicas.
@@ -128,7 +143,7 @@ Los controles permiten:
 - usar letra estable;
 - cambiar tamaño y modo de letra;
 - elegir carriles o escena minimalista;
-- ocultar la letra o las partículas mediante preset;
+- ocultar la letra, las partículas o instrumentos individuales;
 - pausar inmediatamente animación y vibración.
 
 No se producen flashes repetitivos de pantalla completa. Los instrumentos se diferencian mediante forma, trayectoria, posición y etiqueta además de color.
@@ -164,11 +179,13 @@ Cuando no hay control de amplitud se usan solamente duraciones. El usuario puede
 3. Configurar vibraciones e intensidad.
 4. Pulsar **Preparar experiencia**.
 5. Ver el progreso, la cuenta regresiva y la escena de partículas inicial.
-6. Alternar entre **Partículas**, **Carriles** y **Minimal**.
+6. Alternar entre **Sinestesia**, **Carriles** y **Minimal**.
 7. Probar calidad Auto/Baja/Media/Alta · 4K, movimiento reducido, destellos y letra estable.
 8. Cambiar la letra entre original, español, ambas y oculta.
 9. Probar reproducir/pausar, buscar, reiniciar, vibración y ajuste de sincronía.
 10. Volver a elegir la misma canción para comprobar la carga rápida desde caché.
+
+Teleo Música siempre se abre en orientación vertical e inmersiva. Al volver, la pantalla principal recupera su orientación horizontal habitual.
 
 Para compilar y probar desde consola:
 

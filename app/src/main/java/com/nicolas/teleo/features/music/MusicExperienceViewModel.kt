@@ -18,6 +18,7 @@ import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.LyricsDisplayMode
 import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.domain.VisualQuality
+import com.nicolas.teleo.features.music.domain.VisualInstrument
 import com.nicolas.teleo.features.music.domain.adjustedTimelinePosition
 import com.nicolas.teleo.features.music.domain.eventsBetween
 import com.nicolas.teleo.features.music.haptics.AndroidHapticMusicEngine
@@ -151,6 +152,15 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
 
     fun setIntenseVisualWarningEnabled(enabled: Boolean) =
         updateVisuals(visualSettings.copy(intenseVisualWarningEnabled = enabled))
+
+    fun setParticlesEnabled(enabled: Boolean) = updateVisuals(visualSettings.copy(particlesEnabled = enabled))
+
+    fun toggleVisualInstrument(instrument: VisualInstrument) {
+        val updated = visualSettings.visibleInstruments.toMutableSet().apply {
+            if (!add(instrument)) remove(instrument)
+        }
+        updateVisuals(visualSettings.copy(visibleInstruments = updated))
+    }
 
     fun setLyricsDisplayMode(mode: LyricsDisplayMode) = updateVisuals(visualSettings.copy(lyricsDisplayMode = mode))
 

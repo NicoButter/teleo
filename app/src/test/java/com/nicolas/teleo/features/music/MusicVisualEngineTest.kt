@@ -6,6 +6,7 @@ import com.nicolas.teleo.features.music.domain.MusicFeatureFrame
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.domain.VisualQuality
+import com.nicolas.teleo.features.music.domain.VisualInstrument
 import com.nicolas.teleo.features.music.visual.DeterministicMusicVisualEngine
 import com.nicolas.teleo.features.music.visual.LinearMusicFeatureInterpolator
 import org.junit.Assert.assertEquals
@@ -101,6 +102,14 @@ class MusicVisualEngineTest {
         val engine = engine("auto", MusicVisualSettings(quality = VisualQuality.AUTO))
         repeat(12) { index -> engine.update(index * 16L, 0.03f, frame(index * 16L), emptyList()) }
         assertEquals(VisualQuality.MEDIUM, engine.metrics().effectiveQuality)
+    }
+
+    @Test
+    fun `hidden instrument does not emit particles`() {
+        val settings = MusicVisualSettings(visibleInstruments = setOf(VisualInstrument.VOICE))
+        val engine = engine("filtered", settings)
+        engine.update(100, 0f, frame(100), listOf(kick()))
+        assertTrue(engine.particles().isEmpty())
     }
 
     private fun engine(track: String, settings: MusicVisualSettings = MusicVisualSettings()) =

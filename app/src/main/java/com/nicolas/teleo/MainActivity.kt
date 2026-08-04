@@ -82,7 +82,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.nicolas.teleo.ui.theme.TeleoTheme
-import com.nicolas.teleo.features.music.ui.MusicExperienceRoute
+import com.nicolas.teleo.features.music.MusicActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -101,7 +101,7 @@ val ColorPalette = listOf(CyberCyan, CyberTeal, CyberMagenta, CyberYellow, Color
 
 // --- MODELOS ---
 
-enum class Screen { Home, PalabraViva, EscribirYMostrar, TeleoCercaEntry, TeleoCercaCreate, TeleoCercaJoin, TeleoCercaChat, Scanner, Profile, AvatarCamera, TeleoMusic }
+enum class Screen { Home, PalabraViva, EscribirYMostrar, TeleoCercaEntry, TeleoCercaCreate, TeleoCercaJoin, TeleoCercaChat, Scanner, Profile, AvatarCamera }
 enum class NearbyFlowState { IDLE, STARTING, SEARCHING, ADVERTISING, REQUESTING, WAITING_APPROVAL, CONNECTED, ERROR }
 
 data class TeleoNearbyMessage(
@@ -337,7 +337,15 @@ class MainActivity : ComponentActivity() {
                 }
                 StartupSplashScreen()
             } else when (currentScreen.value) {
-                Screen.Home -> HomeScreen(useEmojis, useEmotions, userName.value, userColor.value, userAvatar.value, onNavigate = { currentScreen.value = it })
+                Screen.Home -> HomeScreen(
+                    useEmojis,
+                    useEmotions,
+                    userName.value,
+                    userColor.value,
+                    userAvatar.value,
+                    onNavigate = { currentScreen.value = it },
+                    onOpenMusic = { startActivity(Intent(this, MusicActivity::class.java)) }
+                )
                 Screen.Profile -> ProfileScreen(
                     cn = userName.value,
                     cc = userColor.value,
@@ -375,7 +383,6 @@ class MainActivity : ComponentActivity() {
                 }, onConnected = { nearbyManager.stopDiscovery(); currentScreen.value = Screen.TeleoCercaChat }, onBack = { nearbyManager.stopDiscovery(); currentScreen.value = Screen.TeleoCercaEntry })
                 Screen.Scanner -> QRScannerScreen(onScanResult = { r -> nearbyManager.requestConnectionBySession(r); currentScreen.value = Screen.TeleoCercaJoin }, onBack = { currentScreen.value = Screen.TeleoCercaJoin })
                 Screen.TeleoCercaChat -> NearbyChatScreen(nearbyManager, isListening, useEmojis.value, useEmotions.value, onSV = { startListening() }, onPV = { pauseListening() }, onB = { nearbyManager.disconnect(); currentScreen.value = Screen.Home })
-                Screen.TeleoMusic -> MusicExperienceRoute(onExit = { currentScreen.value = Screen.Home })
             }
         } } }
     }
@@ -545,7 +552,15 @@ fun StartupSplashScreen() {
 }
 
 @Composable
-fun HomeScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, un: String, uc: Int, ua: Bitmap?, onNavigate: (Screen) -> Unit) {
+fun HomeScreen(
+    ue: MutableState<Boolean>,
+    uem: MutableState<Boolean>,
+    un: String,
+    uc: Int,
+    ua: Bitmap?,
+    onNavigate: (Screen) -> Unit,
+    onOpenMusic: () -> Unit
+) {
     val act = LocalContext.current as? android.app.Activity
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(CyberDark, Color(0xFF1A1F26))))) {
         val compactHeader = maxWidth < 900.dp
@@ -588,14 +603,14 @@ fun HomeScreen(ue: MutableState<Boolean>, uem: MutableState<Boolean>, un: String
                     HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
                     HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Escribir", d = "Pantalla completa.", i = Icons.Default.Keyboard, c = CyberTeal) { onNavigate(Screen.EscribirYMostrar) }
                     HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Teleo Cerca", d = "Conexión local.", i = Icons.Default.Wifi, c = CyberCyan) { onNavigate(Screen.TeleoCercaEntry) }
-                    HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Teleo Música", d = "Imagen y tacto · Experimental", i = Icons.Default.LibraryMusic, c = CyberYellow) { onNavigate(Screen.TeleoMusic) }
+                    HomeCard(modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp), t = "Teleo Música", d = "Imagen y tacto · Experimental", i = Icons.Default.LibraryMusic, c = CyberYellow, onClick = onOpenMusic)
                 }
             } else {
                 Row(modifier = Modifier.fillMaxSize().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                     HomeCard(modifier = Modifier.weight(1f), t = "Palabra Viva", d = "Subtítulos en vivo.", i = Icons.Default.Mic, c = CyberMagenta) { onNavigate(Screen.PalabraViva) }
                     HomeCard(modifier = Modifier.weight(1f), t = "Escribir", d = "Pantalla completa.", i = Icons.Default.Keyboard, c = CyberTeal) { onNavigate(Screen.EscribirYMostrar) }
                     HomeCard(modifier = Modifier.weight(1f), t = "Teleo Cerca", d = "Conexión local.", i = Icons.Default.Wifi, c = CyberCyan) { onNavigate(Screen.TeleoCercaEntry) }
-                    HomeCard(modifier = Modifier.weight(1f), t = "Teleo Música", d = "Imagen y tacto · Experimental", i = Icons.Default.LibraryMusic, c = CyberYellow) { onNavigate(Screen.TeleoMusic) }
+                    HomeCard(modifier = Modifier.weight(1f), t = "Teleo Música", d = "Imagen y tacto · Experimental", i = Icons.Default.LibraryMusic, c = CyberYellow, onClick = onOpenMusic)
                 }
             }
         }

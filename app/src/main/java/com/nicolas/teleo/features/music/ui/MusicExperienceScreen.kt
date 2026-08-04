@@ -92,6 +92,7 @@ import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.TimedLyricLine
 import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.domain.VisualQuality
+import com.nicolas.teleo.features.music.domain.VisualInstrument
 import com.nicolas.teleo.features.music.domain.activeWordAt
 import com.nicolas.teleo.features.music.domain.activeLyricAt
 import com.nicolas.teleo.features.music.domain.adjustedTimelinePosition
@@ -201,6 +202,8 @@ fun MusicExperienceRoute(
                 onFlashesChanged = viewModel::setFlashesEnabled,
                 onStableLyricsChanged = viewModel::setStableLyrics,
                 onIntenseVisualWarningChanged = viewModel::setIntenseVisualWarningEnabled,
+                onParticlesEnabledChanged = viewModel::setParticlesEnabled,
+                onToggleInstrument = viewModel::toggleVisualInstrument,
                 onLyricsDisplayModeChanged = viewModel::setLyricsDisplayMode,
                 onLyricsTextScaleChanged = viewModel::setLyricsTextScale
             )
@@ -378,6 +381,8 @@ fun MusicPlaybackScreen(
     onFlashesChanged: (Boolean) -> Unit = {},
     onStableLyricsChanged: (Boolean) -> Unit = {},
     onIntenseVisualWarningChanged: (Boolean) -> Unit = {},
+    onParticlesEnabledChanged: (Boolean) -> Unit = {},
+    onToggleInstrument: (VisualInstrument) -> Unit = {},
     onLyricsDisplayModeChanged: (LyricsDisplayMode) -> Unit = {},
     onLyricsTextScaleChanged: (Float) -> Unit = {}
 ) {
@@ -463,6 +468,8 @@ fun MusicPlaybackScreen(
             onFlashesChanged = onFlashesChanged,
             onStableLyricsChanged = onStableLyricsChanged,
             onIntenseVisualWarningChanged = onIntenseVisualWarningChanged,
+            onParticlesEnabledChanged = onParticlesEnabledChanged,
+            onToggleInstrument = onToggleInstrument,
             onLyricsModeChanged = onLyricsDisplayModeChanged,
             onLyricsTextScaleChanged = onLyricsTextScaleChanged
         )
@@ -519,7 +526,7 @@ private fun MusicVisualStage(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                 )
             }
-            if (settings.intenseVisualWarningEnabled && settings.preset == VisualPreset.PARTICLES && !settings.reducedMotion) {
+            if (settings.intenseVisualWarningEnabled && settings.preset == VisualPreset.SYNESTHETIC && !settings.reducedMotion) {
                 Surface(
                     modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                     color = MusicYellow.copy(alpha = 0.12f),
@@ -612,6 +619,8 @@ private fun VisualControls(
     onFlashesChanged: (Boolean) -> Unit,
     onStableLyricsChanged: (Boolean) -> Unit,
     onIntenseVisualWarningChanged: (Boolean) -> Unit,
+    onParticlesEnabledChanged: (Boolean) -> Unit,
+    onToggleInstrument: (VisualInstrument) -> Unit,
     onLyricsModeChanged: (LyricsDisplayMode) -> Unit,
     onLyricsTextScaleChanged: (Float) -> Unit
 ) {
@@ -622,7 +631,7 @@ private fun VisualControls(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("ESCENA", color = MusicCyan, fontSize = 10.sp, fontWeight = FontWeight.Black)
-            listOf(VisualPreset.PARTICLES, VisualPreset.LANES, VisualPreset.MINIMAL).forEach { preset ->
+            listOf(VisualPreset.SYNESTHETIC, VisualPreset.LANES, VisualPreset.MINIMAL).forEach { preset ->
                 FilterChip(
                     selected = settings.preset == preset,
                     onClick = { onPresetChanged(preset) },
@@ -642,6 +651,7 @@ private fun VisualControls(
             AccessibilitySwitch("Destellos", settings.flashesEnabled, onFlashesChanged, "music_flashes")
             AccessibilitySwitch("Letra estable", settings.stableLyrics, onStableLyricsChanged, "music_stable_lyrics")
             AccessibilitySwitch("Aviso intenso", settings.intenseVisualWarningEnabled, onIntenseVisualWarningChanged, "music_visual_warning")
+            AccessibilitySwitch("Partículas", settings.particlesEnabled, onParticlesEnabledChanged, "music_particles")
         }
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -660,6 +670,21 @@ private fun VisualControls(
             Text("Tamaño", color = Color.White.copy(alpha = 0.68f), fontSize = 10.sp)
             OutlinedButton(onClick = { onLyricsTextScaleChanged(settings.lyricsTextScale - 0.1f) }, enabled = settings.lyricsTextScale > 0.8f) { Text("A−") }
             OutlinedButton(onClick = { onLyricsTextScaleChanged(settings.lyricsTextScale + 0.1f) }, enabled = settings.lyricsTextScale < 1.5f) { Text("A+") }
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("INSTRUMENTOS", color = MusicTeal, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            VisualInstrument.entries.forEach { instrument ->
+                FilterChip(
+                    selected = instrument in settings.visibleInstruments,
+                    onClick = { onToggleInstrument(instrument) },
+                    label = { Text(instrument.label, fontSize = 10.sp) },
+                    modifier = Modifier.testTag("music_instrument_${instrument.name.lowercase()}")
+                )
+            }
         }
     }
 }

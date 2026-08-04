@@ -18,9 +18,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.nicolas.teleo.features.music.domain.MusicFeatureFrame
+import com.nicolas.teleo.features.music.domain.MusicEventType
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.VisualPreset
+import com.nicolas.teleo.features.music.domain.VisualInstrument
 import com.nicolas.teleo.features.music.domain.activeEventsAt
 import com.nicolas.teleo.features.music.domain.eventsBetween
 import com.nicolas.teleo.features.music.visual.DeterministicMusicVisualEngine
@@ -49,9 +51,13 @@ fun GenerativeMusicCanvas(
     val wavePath = remember { Path() }
     val secondaryWavePath = remember { Path() }
     val particlePath = remember { Path() }
+    val organicPath = remember { Path() }
     var renderTick by remember { mutableIntStateOf(0) }
     var positionMs by remember { mutableLongStateOf(playbackPositionProvider()) }
     var features by remember { mutableStateOf(interpolator.interpolate(timeline.featureFrames, positionMs)) }
+    var lastKickMs by remember { mutableLongStateOf(-10_000L) }
+    var lastSnareMs by remember { mutableLongStateOf(-10_000L) }
+    var lastHiHatMs by remember { mutableLongStateOf(-10_000L) }
 
     LaunchedEffect(engine, settings) {
         engine.setSettings(settings)
@@ -68,15 +74,25 @@ fun GenerativeMusicCanvas(
                 }
                 val currentFeatures = interpolator.interpolate(timeline.featureFrames, currentPosition)
                 val distance = currentPosition - previousPosition
-                if (distance < 0 || distance > 750) {
+                val visualEvents = if (distance < 0 || distance > 750) {
                     val recent = timeline.events.filter {
                         it.timestampMs in (currentPosition - 1_200L).coerceAtLeast(0)..currentPosition
                     }
                     engine.rebuild(currentPosition, currentFeatures, recent)
+                    recent
                 } else {
                     val frameEvents = (timeline.eventsBetween(previousPosition, currentPosition) +
                         timeline.activeEventsAt(currentPosition)).distinctBy { "${it.timestampMs}:${it.type}" }
                     engine.update(currentPosition, deltaSeconds, currentFeatures, frameEvents)
+                    frameEvents
+                }
+                visualEvents.forEach { event ->
+                    when (event.type) {
+                        MusicEventType.KICK -> lastKickMs = event.timestampMs
+                        MusicEventType.SNARE -> lastSnareMs = event.timestampMs
+                        MusicEventType.HI_HAT -> lastHiHatMs = event.timestampMs
+                        else -> Unit
+                    }
                 }
                 previousFrameNanos = frameNanos
                 previousPosition = currentPosition
@@ -91,11 +107,136 @@ fun GenerativeMusicCanvas(
         @Suppress("UNUSED_VARIABLE")
         val invalidateCanvasOnly = renderTick
         drawGenerativeBackground(features, settings, positionMs)
-        drawReactiveWaves(features, settings, positionMs, wavePath, secondaryWavePath)
-        if (settings.preset != VisualPreset.MINIMAL) {
+        if (settings.preset == VisualPreset.SYNESTHETIC) {
+            drawSynestheticInstruments(features, settings, positionMs, lastKickMs, lastSnareMs, lastHiHatMs, organicPath)
+        }
+        if (VisualInstrument.BASS in settings.visibleInstruments) {
+            drawReactiveWaves(features, settings, positionMs, wavePath, secondaryWavePath)
+        }
+        if (settings.particlesEnabled && settings.preset != VisualPreset.MINIMAL) {
             engine.particles().forEach { drawMusicParticle(it, particlePath, settings) }
         }
-        drawBeatFocus(features, settings)
+        if (VisualInstrument.RHYTHM in settings.visibleInstruments && settings.preset != VisualPreset.SYNESTHETIC) {
+            drawBeatFocus(features, settings)
+        }
+    }
+}
+
+private fun DrawScope.drawSynestheticInstruments(
+    features: MusicFeatureFrame,
+    settings: MusicVisualSettings,
+    positionMs: Long,
+    lastKickMs: Long,
+    lastSnareMs: Long,
+    lastHiHatMs: Long,
+    organicPath: Path
+) {
+    val motion = if (settings.reducedMotion) 0.18f else settings.motionIntensity
+    val time = positionMs / 1_000f * motion
+
+    if (VisualInstrument.PIANO in settings.visibleInstruments) {
+        val startX = size.width * 0.12f
+        val endX = size.width * 0.88f
+        val pianoY = size.height * 0.16f
+        val segmentWidth = (endX - startX) / 8f
+        repeat(8) { index ->
+            val left = startX + index * segmentWidth
+            drawLine(
+                color = Color.White.copy(alpha = 0.22f),
+                start = Offset(left, pianoY),
+                end = Offset(left + segmentWidth * 0.78f, pianoY),
+                strokeWidth = if (index % 2 == 0) 5f else 2.5f
+            )
+        }
+        val pitch = features.melodicPitchNormalized ?: 0.5f
+        val noteX = startX + (endX - startX) * pitch
+        drawCircle(
+            color = Color(0xFFB9F6FF).copy(alpha = 0.35f + features.midEnergy * 0.5f),
+            radius = size.minDimension * (0.012f + features.midEnergy * 0.018f),
+            center = Offset(noteX, pianoY),
+            blendMode = BlendMode.Screen
+        )
+    }
+
+    if (VisualInstrument.VOICE in settings.visibleInstruments) {
+        val voiceCenter = Offset(size.width * 0.5f, size.height * 0.38f)
+        val points = if (settings.reducedMotion) 12 else 20
+        val baseRadius = size.minDimension * (0.09f + features.vocalPresence * 0.055f)
+        organicPath.reset()
+        repeat(points) { index ->
+            val angle = index / points.toFloat() * PI.toFloat() * 2f
+            val deformation = 1f + sin(angle * 3f + time * 2.2f) * features.vocalPresence * 0.13f
+            val point = Offset(
+                voiceCenter.x + cos(angle) * baseRadius * deformation,
+                voiceCenter.y + sin(angle) * baseRadius * deformation * 0.82f
+            )
+            if (index == 0) organicPath.moveTo(point.x, point.y) else organicPath.lineTo(point.x, point.y)
+        }
+        organicPath.close()
+        drawPath(organicPath, Color(0xFFFF00D4).copy(alpha = 0.08f + features.vocalPresence * 0.16f))
+        drawPath(
+            organicPath,
+            Color(0xFFFF79E4).copy(alpha = 0.36f + features.vocalPresence * 0.48f),
+            style = Stroke(2f + features.vocalPresence * 5f)
+        )
+    }
+
+    if (VisualInstrument.GUITAR in settings.visibleInstruments) {
+        val guitarY = size.height * 0.56f
+        val amplitude = size.height * (0.006f + features.midEnergy * 0.022f)
+        val samples = 28
+        var previous = Offset(size.width * 0.1f, guitarY)
+        repeat(samples) { index ->
+            val fraction = (index + 1) / samples.toFloat()
+            val current = Offset(
+                size.width * (0.1f + fraction * 0.8f),
+                guitarY + sin(fraction * PI.toFloat() * 8f + time * 5f) * amplitude * sin(fraction * PI).toFloat()
+            )
+            drawLine(Color(0xFF00E5FF).copy(alpha = 0.58f), previous, current, strokeWidth = 2.2f)
+            previous = current
+        }
+    }
+
+    if (VisualInstrument.RHYTHM in settings.visibleInstruments) {
+        val kickAge = positionMs - lastKickMs
+        if (kickAge in 0..520) {
+            val progress = kickAge / 520f
+            val center = Offset(size.width * 0.5f, size.height * 0.82f)
+            val radius = size.minDimension * (0.045f + progress * 0.13f)
+            drawCircle(
+                Color(0xFFFEE715).copy(alpha = (1f - progress) * 0.8f),
+                radius,
+                center,
+                style = Stroke(3f + (1f - progress) * 9f)
+            )
+        }
+        val snareAge = positionMs - lastSnareMs
+        if (snareAge in 0..360) {
+            val progress = snareAge / 360f
+            val x = size.width * 0.68f
+            val impactY = size.height * 0.47f
+            val topY = size.height * 0.08f
+            val currentY = topY + (impactY - topY) * progress
+            drawLine(
+                Color(0xFFFF6BD6).copy(alpha = 1f - progress * 0.35f),
+                Offset(x, (currentY - size.height * 0.11f).coerceAtLeast(topY)),
+                Offset(x, currentY),
+                strokeWidth = 5f
+            )
+            if (progress > 0.72f) {
+                val spread = (progress - 0.72f) / 0.28f * size.width * 0.12f
+                drawLine(Color(0xFFFF6BD6).copy(alpha = 1f - progress), Offset(x, impactY), Offset(x - spread, impactY + spread * 0.25f), 3f)
+                drawLine(Color(0xFFFF6BD6).copy(alpha = 1f - progress), Offset(x, impactY), Offset(x + spread, impactY + spread * 0.25f), 3f)
+            }
+        }
+        val hiHatAge = positionMs - lastHiHatMs
+        if (settings.flashesEnabled && hiHatAge in 0..180) {
+            val alpha = (1f - hiHatAge / 180f) * if (settings.limitBrightnessChanges) 0.55f else 0.9f
+            val sparkleCenter = Offset(size.width * 0.82f, size.height * 0.11f)
+            val length = size.minDimension * 0.055f
+            drawLine(Color.White.copy(alpha = alpha), sparkleCenter - Offset(length, 0f), sparkleCenter + Offset(length, 0f), 2f)
+            drawLine(Color.White.copy(alpha = alpha), sparkleCenter - Offset(0f, length), sparkleCenter + Offset(0f, length), 2f)
+        }
     }
 }
 

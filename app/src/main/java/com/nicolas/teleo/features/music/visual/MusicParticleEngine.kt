@@ -7,6 +7,7 @@ import com.nicolas.teleo.features.music.domain.MusicFrameMetrics
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.domain.VisualQuality
+import com.nicolas.teleo.features.music.domain.VisualInstrument
 import java.util.ArrayDeque
 import java.util.Random
 import kotlin.math.PI
@@ -181,10 +182,12 @@ class DeterministicMusicVisualEngine(
         positionMs = playbackPositionMs
         trackFrameTime(deltaTimeSeconds)
         pool.resize(particleCap())
-        if (preset != VisualPreset.MINIMAL && preset != VisualPreset.LANES) {
+        if (settings.particlesEnabled && preset != VisualPreset.MINIMAL && preset != VisualPreset.LANES) {
             activeEvents.forEach { event ->
                 val key = "${event.timestampMs}:${event.type}:${event.label.orEmpty()}"
-                if (consumedEvents.add(key)) emitters[event.type]?.emit(event, features, randomFor(event), pool, settings)
+                if (isVisible(event.type) && consumedEvents.add(key)) {
+                    emitters[event.type]?.emit(event, features, randomFor(event), pool, settings)
+                }
             }
         }
         val motion = if (settings.reducedMotion) 0.22f else settings.motionIntensity
@@ -240,6 +243,7 @@ class DeterministicMusicVisualEngine(
     override fun metrics(): MusicFrameMetrics = MusicFrameMetrics(averageFrameMs, slowFrames, effectiveQuality)
 
     private fun particleCap(): Int {
+        if (!settings.particlesEnabled) return 0
         val accessibilityFactor = if (settings.reducedMotion) 0.35f else settings.particleIntensity
         return (effectiveQuality.particleLimit * accessibilityFactor).toInt().coerceIn(0, effectiveQuality.particleLimit)
     }
@@ -247,6 +251,15 @@ class DeterministicMusicVisualEngine(
     private fun randomFor(event: MusicEvent): Random {
         val seed = "$seedPrefix|${preset.name}|${event.timestampMs}|${event.type.name}".hashCode().toLong()
         return Random(seed)
+    }
+
+    private fun isVisible(type: MusicEventType): Boolean = when (type) {
+        MusicEventType.KICK, MusicEventType.SNARE, MusicEventType.HI_HAT, MusicEventType.SECTION_START,
+        MusicEventType.SECTION_END -> VisualInstrument.RHYTHM in settings.visibleInstruments
+        MusicEventType.BASS -> VisualInstrument.BASS in settings.visibleInstruments
+        MusicEventType.VOCAL_START, MusicEventType.VOCAL_END -> VisualInstrument.VOICE in settings.visibleInstruments
+        MusicEventType.MELODY_UP, MusicEventType.MELODY_DOWN ->
+            VisualInstrument.GUITAR in settings.visibleInstruments || VisualInstrument.PIANO in settings.visibleInstruments
     }
 
     private fun trackFrameTime(deltaTimeSeconds: Float) {
