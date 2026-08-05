@@ -24,8 +24,11 @@ Esta separación permite extraer la funcionalidad a un módulo Gradle propio má
 
 - `androidx.media3:media3-exoplayer:1.5.1` para reproducir el URI seleccionado. Se mantiene esta versión compatible con `compileSdk 35`; las versiones actuales de Media3 exigen elevar el SDK de compilación.
 - `androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7` para conservar y exponer el estado del feature.
+- `androidx.graphics:graphics-shapes:1.1.0` para construir siluetas orgánicas compatibles y producir transiciones vectoriales con `RoundedPolygon` y `Morph` dentro de Compose Canvas.
 
 Coroutines y Lifecycle ya formaban parte de las dependencias transitivas/actuales. El JSON usa `org.json`, igual que el código existente, por lo que no se agregó una biblioteca de serialización. No se agregó Media3 Session porque esta etapa no reproduce fuera de la actividad ni publica controles del sistema. Tampoco se agregó WorkManager: el análisis simulado es corto y se cancela junto con el ViewModel.
+
+No se agregó `graphics-path`: `graphics-shapes` ya convierte el resultado del morph a un `android.graphics.Path`, que Compose puede dibujar directamente, y el laboratorio no inspecciona segmentos. Tampoco se incorporaron Rive, Lottie, libGDX, motores de juegos ni sistemas de partículas externos.
 
 ## Flujo de estados
 
@@ -75,6 +78,41 @@ El motor visual no abre ni analiza archivos. Consume solamente `MusicTimeline`, 
 5. `GenerativeMusicCanvas` adapta el resultado al Canvas acelerado de Compose.
 
 El ciclo de cada fotograma usa `withFrameNanos`, pero no convierte ese tiempo en una posición musical. En cada frame consulta `ExoPlayer.currentPosition`, interpola características en esa posición, obtiene eventos cruzados desde el frame anterior, actualiza el motor y dibuja. El delta de frame sólo se utiliza para física visual. Al pausar, el ciclo se suspende; al buscar o cambiar de canción, el motor se reconstruye con la posición real y eventos recientes.
+
+## Voice Visual Lab
+
+`Voice Visual Lab` es un laboratorio interno, vertical y completamente simulado para validar el futuro lenguaje visual de la voz sin abrir el micrófono ni analizar una canción. Se abre desde la pantalla inicial de Teleo Música con **Abrir Voice Visual Lab**. Puede utilizarse sin seleccionar un archivo.
+
+La arquitectura mantiene tres responsabilidades separadas:
+
+1. `VoiceVisualFrame`, `VowelProbabilities`, `VoiceVisualSettings` y los parámetros de suavizado/tuning forman la entrada normalizada, sin dependencias de Media3.
+2. `DefaultVoiceVisualRenderer` filtra presencia, intensidad, tono, vibrato y probabilidades; resuelve el morph; actualiza posición, escala, opacidad y partículas. También expone `reset()` para limpiar la escena.
+3. `VoiceBlobCanvas` usa el reloj de frames de Compose y dibuja únicamente el estado preparado. El ciclo se ejecuta con `repeatOnLifecycle(STARTED)`, se detiene fuera de pantalla y limpia el renderer al salir.
+
+### Lenguaje de vocales y morphing
+
+Todas las vocales usan 20 vértices con el mismo orden para conservar compatibilidad geométrica:
+
+- **A**: ancha, abierta y con expansión lateral.
+- **E**: horizontal y con ondulación moderada.
+- **I**: estrecha y vertical.
+- **O**: redondeada, profunda y simétrica.
+- **U**: compacta y más cerrada arriba.
+- **Neutral/UNKNOWN**: círculo orgánico estable.
+
+`VoiceShapeLibrary` construye cada objetivo como `RoundedPolygon` y cachea cada par de `Morph`. El renderer normaliza las seis probabilidades, suaviza sus cambios, identifica las dos más fuertes y calcula la proporción relativa antes de pedir el path intermedio. De este modo no se fuerza a `Morph` a mezclar más geometrías que las admitidas por su contrato.
+
+La presencia controla opacidad y aparición; la intensidad controla escala, grosor, luminosidad y emisión; el tono desplaza moderadamente la figura en vertical; el vibrato ondula un contorno continuo; y un ataque o aumento abrupto de intensidad dispara partículas desde el borde. Los multiplicadores viven en `VoiceVisualTuning` y `VoiceVisualSettings`, no en la pantalla de controles.
+
+### Suavizado, partículas y accesibilidad
+
+El filtro exponencial usa ataque más rápido que relajación para responder a una entrada y volver gradualmente al punto central al desaparecer la voz. También amortigua la posición, escala y probabilidades de vocales. El vibrato suma una onda continua dependiente del tiempo, sin ruido aleatorio entre frames.
+
+El motor propio de partículas utiliza pool y reciclado, delta limitado a 50 ms y una semilla fija. Los topes son 40 en `LOW`, 100 en `MEDIUM`/`AUTO` y 200 en `HIGH`. Movimiento reducido conserva la lectura de intensidad, pero reduce al 22 % el desplazamiento/deformación y limita las partículas al 35 % de la calidad elegida. Desactivar partículas las devuelve inmediatamente al pool.
+
+La pantalla ofrece sliders de presencia, intensidad, tono, vibrato y ataque; vocal dominante, segunda vocal y mezcla; calidad; partículas; movimiento reducido; y destellos permitidos. Incluye Silencio, Voz suave, Voz intensa, A/E/I/O/U, Vibrato, Ataque fuerte y una secuencia automática que interpola estados para inspeccionar continuidad.
+
+La ruta futura queda preparada así: `MusicTimeline → MusicFeatureInterpolator → VoiceVisualFrame → VoiceVisualRenderer`. En esta etapa no hay detección real de vocales, MediaPipe, TensorFlow/LiteRT, separación de voz, Demucs, micrófono ni conexión con la reproducción.
 
 ### Renderizado de alta resolución
 
@@ -157,6 +195,8 @@ No se producen flashes repetitivos de pantalla completa. Los instrumentos se dif
 - El delta se limita a 50 ms para impedir saltos físicos tras una pausa del sistema.
 - La calidad automática registra tiempo medio y cantidad de frames lentos y reduce el máximo de partículas.
 - Archivo, traducción, caché y análisis permanecen fuera del bucle de dibujo.
+- Voice Visual Lab reutiliza los `Path` y la matriz de transformación, cachea morphs y limita el pool a 40/100/200 objetos según calidad.
+- El laboratorio no mantiene un loop activo cuando su lifecycle baja de `STARTED`; `reset()` recicla todas las partículas al navegar hacia atrás.
 
 Las cifras reales de FPS/jank deben medirse en builds release sobre dispositivos 1080p y 4K de gama media. El modo `HIGH · 4K` describe la calidad máxima y el render nativo; no puede convertir físicamente una pantalla de menor resolución en 4K.
 
@@ -175,15 +215,16 @@ Cuando no hay control de amplitud se usan solamente duraciones. El usuario puede
 ## Ejecutar la demostración
 
 1. Abrir Teleo y elegir la tarjeta **Teleo Música — Experimental**.
-2. Pulsar **Seleccionar canción** y elegir un documento de audio local mediante el selector del sistema.
-3. Configurar vibraciones e intensidad.
-4. Pulsar **Preparar experiencia**.
-5. Ver el progreso, la cuenta regresiva y la escena de partículas inicial.
-6. Alternar entre **Sinestesia**, **Carriles** y **Minimal**.
-7. Probar calidad Auto/Baja/Media/Alta · 4K, movimiento reducido, destellos y letra estable.
-8. Cambiar la letra entre original, español, ambas y oculta.
-9. Probar reproducir/pausar, buscar, reiniciar, vibración y ajuste de sincronía.
-10. Volver a elegir la misma canción para comprobar la carga rápida desde caché.
+2. Para probar la voz sin audio, pulsar **Abrir Voice Visual Lab** y usar sus sliders o demos. No requiere seleccionar una canción.
+3. Para continuar con la experiencia musical, pulsar **Seleccionar canción** y elegir un documento de audio local mediante el selector del sistema.
+4. Configurar vibraciones e intensidad.
+5. Pulsar **Preparar experiencia**.
+6. Ver el progreso, la cuenta regresiva y la escena de partículas inicial.
+7. Alternar entre **Sinestesia**, **Carriles** y **Minimal**.
+8. Probar calidad Auto/Baja/Media/Alta · 4K, movimiento reducido, destellos y letra estable.
+9. Cambiar la letra entre original, español, ambas y oculta.
+10. Probar reproducir/pausar, buscar, reiniciar, vibración y ajuste de sincronía.
+11. Volver a elegir la misma canción para comprobar la carga rápida desde caché.
 
 Teleo Música siempre se abre en orientación vertical e inmersiva. Al volver, la pantalla principal recupera su orientación horizontal habitual.
 
@@ -212,6 +253,7 @@ Las pruebas instrumentadas Compose requieren un emulador o dispositivo:
 - El indicador de búfer representa el futuro procesamiento por ventanas, no el búfer de red de ExoPlayer.
 - No hay sesión multimedia, reproducción en segundo plano, WorkManager, servidor ni IA.
 - No hay todavía integración Bluetooth con un dispositivo háptico externo.
+- Voice Visual Lab usa controles y secuencias simuladas: todavía no recibe presencia, intensidad, tono, vibrato, ataques ni probabilidades de vocales desde audio real.
 
 ## Próximas etapas
 

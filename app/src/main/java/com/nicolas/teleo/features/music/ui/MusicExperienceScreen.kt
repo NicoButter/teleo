@@ -55,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -115,6 +116,7 @@ fun MusicExperienceRoute(
     var selectedIntensity by remember { mutableStateOf(HapticIntensity.MEDIUM) }
     var hapticsEnabled by remember { mutableStateOf(true) }
     var selectionError by remember { mutableStateOf<String?>(null) }
+    var showVoiceVisualLab by rememberSaveable { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -134,6 +136,10 @@ fun MusicExperienceRoute(
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MusicDark) {
+        if (showVoiceVisualLab) {
+            VoiceVisualLabScreen(onBack = { showVoiceVisualLab = false })
+            return@Surface
+        }
         when (val current = state) {
             MusicExperienceState.Idle -> MusicSelectionScreen(
                 track = null,
@@ -150,7 +156,8 @@ fun MusicExperienceRoute(
                     selectedIntensity = it
                     viewModel.setHapticIntensity(it)
                 },
-                onBack = leaveFeature
+                onBack = leaveFeature,
+                onOpenVoiceLab = { showVoiceVisualLab = true }
             )
             is MusicExperienceState.TrackSelected -> MusicSelectionScreen(
                 track = current.track,
@@ -167,7 +174,8 @@ fun MusicExperienceRoute(
                     selectedIntensity = it
                     viewModel.setHapticIntensity(it)
                 },
-                onBack = leaveFeature
+                onBack = leaveFeature,
+                onOpenVoiceLab = { showVoiceVisualLab = true }
             )
             is MusicExperienceState.Analyzing -> MusicPreparationScreen(
                 progress = current.progress,
@@ -227,7 +235,8 @@ fun MusicSelectionScreen(
     onPrepare: () -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
     onIntensityChanged: (HapticIntensity) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenVoiceLab: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -288,6 +297,17 @@ fun MusicSelectionScreen(
             onIntensityChanged = onIntensityChanged
         )
         Spacer(Modifier.height(18.dp))
+        OutlinedButton(
+            onClick = onOpenVoiceLab,
+            modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).heightIn(min = 48.dp)
+                .testTag("music_open_voice_lab"),
+            border = BorderStroke(1.dp, MusicMagenta.copy(alpha = 0.8f))
+        ) {
+            Icon(Icons.Default.KeyboardVoice, null, tint = MusicMagenta)
+            Spacer(Modifier.width(8.dp))
+            Text("ABRIR VOICE VISUAL LAB", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(12.dp))
         Button(
             onClick = onPrepare,
             enabled = track != null,

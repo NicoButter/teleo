@@ -2,6 +2,7 @@ package com.nicolas.teleo.features.music
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -19,6 +20,7 @@ import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.ui.MusicPlaybackScreen
 import com.nicolas.teleo.features.music.ui.MusicPreparationScreen
 import com.nicolas.teleo.features.music.ui.MusicSelectionScreen
+import com.nicolas.teleo.features.music.ui.VoiceVisualLabScreen
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -109,6 +111,15 @@ class MusicExperienceScreenTest {
         }
         composeRule.onNodeWithTag("music_lyrics_translated").performClick()
         assertTrue(mode == LyricsDisplayMode.TRANSLATED)
+    }
+
+    @Test
+    fun voiceVisualLabLoadsAndAppliesIntenseDemo() {
+        composeRule.setContent { MaterialTheme { VoiceVisualLabScreen(onBack = {}) } }
+
+        composeRule.onNodeWithTag("voice_lab").assertIsDisplayed()
+        composeRule.onNodeWithTag("voice_demo_intense").performClick()
+        composeRule.onNodeWithTag("voice_lab_state").assertTextContains("Presencia 100%")
     }
 
     @androidx.compose.runtime.Composable
