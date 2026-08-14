@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nicolas.teleo.features.music.MusicExperienceViewModel
+import com.nicolas.teleo.BuildConfig
 import com.nicolas.teleo.features.music.data.MusicTrackResolver
 import com.nicolas.teleo.features.music.domain.HapticIntensity
 import com.nicolas.teleo.features.music.domain.LyricsDisplayMode
@@ -90,6 +91,12 @@ import com.nicolas.teleo.features.music.domain.MusicExperienceState
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicTrack
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
+import com.nicolas.teleo.features.music.domain.MusicExperienceSource
+import com.nicolas.teleo.features.music.domain.TeleoMusicCatalog
+import com.nicolas.teleo.features.music.domain.TeleoMusicCatalogTrack
+import com.nicolas.teleo.features.music.domain.RemoteMusicExperience
+import com.nicolas.teleo.features.music.domain.activeVisemeAt
+import com.nicolas.teleo.features.music.domain.activeEventsAt
 import com.nicolas.teleo.features.music.domain.TimedLyricLine
 import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.domain.VisualQuality
@@ -125,7 +132,8 @@ fun MusicExperienceRoute(
             runCatching { MusicTrackResolver.resolve(context, uri) }
                 .onSuccess {
                     selectionError = null
-                    viewModel.selectTrack(it)
+                    if (state is MusicExperienceState.AwaitingAudio) viewModel.selectAudioForRemote(it)
+                    else viewModel.selectTrack(it)
                 }
                 .onFailure { selectionError = "No se pudo leer el archivo seleccionado." }
         }
@@ -141,6 +149,38 @@ fun MusicExperienceRoute(
             return@Surface
         }
         when (val current = state) {
+            MusicExperienceState.LoadingCatalog -> RemoteLoadingScreen("Cargando experiencias Teleo…", leaveFeature)
+            is MusicExperienceState.CatalogReady -> RemoteCatalogScreen(
+                catalog = current.catalog,
+                offline = current.isOfflineCache,
+                warning = current.warning,
+                onRefresh = viewModel::refreshCatalog,
+                onSelect = viewModel::selectRemoteExperience,
+                onOpenMock = viewModel::openMockSelection,
+                onBack = leaveFeature,
+                onOpenVoiceLab = { showVoiceVisualLab = true }
+            )
+            is MusicExperienceState.DownloadingExperience -> RemoteLoadingScreen("Descargando ${current.track.title}…", viewModel::backToCatalog)
+            is MusicExperienceState.AwaitingAudio -> AwaitingAudioScreen(
+                experience = current.experience,
+                error = current.validationError ?: selectionError,
+                onSelectAudio = { picker.launch(arrayOf("audio/*")) },
+                onBack = viewModel::backToCatalog
+            )
+            is MusicExperienceState.ValidatingAudio -> RemoteLoadingScreen("Validando el audio seleccionado…", viewModel::backToCatalog)
+            is MusicExperienceState.RemoteReady -> MusicSelectionScreen(
+                track = current.track,
+                hapticsEnabled = hapticsEnabled,
+                selectedIntensity = selectedIntensity,
+                errorMessage = null,
+                onSelectTrack = { picker.launch(arrayOf("audio/*")) },
+                onPrepare = viewModel::prepare,
+                onHapticsChanged = { hapticsEnabled = it; viewModel.setHapticsEnabled(it) },
+                onIntensityChanged = { selectedIntensity = it; viewModel.setHapticIntensity(it) },
+                onBack = viewModel::backToCatalog,
+                onOpenVoiceLab = { showVoiceVisualLab = true },
+                sourceLabel = "REMOTE · ${current.experience.catalogTrack.quality.label}"
+            )
             MusicExperienceState.Idle -> MusicSelectionScreen(
                 track = null,
                 hapticsEnabled = hapticsEnabled,
@@ -157,7 +197,8 @@ fun MusicExperienceRoute(
                     viewModel.setHapticIntensity(it)
                 },
                 onBack = leaveFeature,
-                onOpenVoiceLab = { showVoiceVisualLab = true }
+                onOpenVoiceLab = { showVoiceVisualLab = true },
+                sourceLabel = "MOCK · DEMO LOCAL"
             )
             is MusicExperienceState.TrackSelected -> MusicSelectionScreen(
                 track = current.track,
@@ -175,7 +216,8 @@ fun MusicExperienceRoute(
                     viewModel.setHapticIntensity(it)
                 },
                 onBack = leaveFeature,
-                onOpenVoiceLab = { showVoiceVisualLab = true }
+                onOpenVoiceLab = { showVoiceVisualLab = true },
+                sourceLabel = "MOCK · DEMO LOCAL"
             )
             is MusicExperienceState.Analyzing -> MusicPreparationScreen(
                 progress = current.progress,
@@ -218,10 +260,87 @@ fun MusicExperienceRoute(
             is MusicExperienceState.Error -> MusicErrorScreen(
                 message = current.message,
                 recoverable = current.recoverable,
-                onRetry = viewModel::prepare,
-                onBack = leaveFeature
+                onRetry = viewModel::refreshCatalog,
+                onBack = viewModel::backToCatalog
             )
         }
+    }
+}
+
+@Composable
+private fun RemoteCatalogScreen(
+    catalog: TeleoMusicCatalog,
+    offline: Boolean,
+    warning: String?,
+    onRefresh: () -> Unit,
+    onSelect: (TeleoMusicCatalogTrack) -> Unit,
+    onOpenMock: () -> Unit,
+    onBack: () -> Unit,
+    onOpenVoiceLab: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        FeatureHeader("TELEO MÚSICA", if (offline) "OFFLINE · CACHÉ" else "EXPERIENCIAS REMOTAS", onBack)
+        Text("EXPERIENCIAS TELEO", color = MusicCyan, fontWeight = FontWeight.Black, fontSize = 23.sp)
+        Text(
+            if (offline) "Usando versión descargada." else "Elegí una experiencia y luego su audio local correspondiente.",
+            color = Color.White.copy(alpha = .68f), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp)
+        )
+        warning?.let { Text(it, color = MusicYellow, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
+        OutlinedButton(onClick = onRefresh, modifier = Modifier.padding(top = 14.dp).testTag("music_refresh_catalog")) {
+            Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("ACTUALIZAR")
+        }
+        if (catalog.tracks.isEmpty()) {
+            Text("No hay experiencias remotas disponibles.", color = Color.White.copy(alpha = .56f), modifier = Modifier.padding(28.dp))
+        } else catalog.tracks.forEach { track ->
+            Surface(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(top = 12.dp),
+                color = Color.White.copy(alpha = .045f), shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.dp, MusicCyan.copy(alpha = .32f))
+            ) {
+                Column(Modifier.padding(18.dp)) {
+                    Text(track.title, color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    track.artist?.let { Text(it, color = Color.White.copy(alpha = .62f)) }
+                    Text("${formatTime(track.durationMs)} · ${track.quality.label} · v${track.experienceVersion}", color = MusicTeal, fontSize = 12.sp)
+                    Button(onClick = { onSelect(track) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("music_remote_${track.id}"), colors = ButtonDefaults.buttonColors(containerColor = MusicCyan, contentColor = MusicDark)) {
+                        Text("DESCARGAR EXPERIENCIA", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        OutlinedButton(onClick = onOpenMock, modifier = Modifier.padding(top = 22.dp), border = BorderStroke(1.dp, MusicMagenta.copy(alpha = .7f))) {
+            Text("USAR DEMO LOCAL (MOCK)")
+        }
+        OutlinedButton(onClick = onOpenVoiceLab, modifier = Modifier.padding(top = 10.dp), border = BorderStroke(1.dp, MusicMagenta.copy(alpha = .7f))) {
+            Text("ABRIR VOICE VISUAL LAB")
+        }
+    }
+}
+
+@Composable
+private fun RemoteLoadingScreen(message: String, onCancel: () -> Unit) {
+    Box(Modifier.fillMaxSize().testTag("music_remote_loading"), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = MusicCyan)
+            Text(message, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp), textAlign = TextAlign.Center)
+            OutlinedButton(onClick = onCancel) { Text("CANCELAR") }
+        }
+    }
+}
+
+@Composable
+private fun AwaitingAudioScreen(experience: RemoteMusicExperience, error: String?, onSelectAudio: () -> Unit, onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        FeatureHeader("TELEO MÚSICA", "REMOTE · AUDIO LOCAL", onBack)
+        Icon(Icons.Default.LibraryMusic, null, tint = MusicCyan, modifier = Modifier.size(64.dp))
+        Text(experience.catalogTrack.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+        experience.catalogTrack.artist?.let { Text(it, color = Color.White.copy(alpha = .65f)) }
+        Text("Seleccioná el audio local correspondiente (${formatTime(experience.timeline.durationMs)}).", color = Color.White.copy(alpha = .7f), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 14.dp))
+        error?.let { Text(it, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp)) }
+        Button(onClick = onSelectAudio, modifier = Modifier.padding(top = 22.dp).testTag("music_select_remote_audio"), colors = ButtonDefaults.buttonColors(containerColor = MusicCyan, contentColor = MusicDark)) { Text("ELEGIR AUDIO LOCAL") }
+        Text("La experiencia usa datos remotos validados y el audio nunca se copia al almacenamiento privado.", color = Color.White.copy(alpha = .45f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp))
     }
 }
 
@@ -236,13 +355,14 @@ fun MusicSelectionScreen(
     onHapticsChanged: (Boolean) -> Unit,
     onIntensityChanged: (HapticIntensity) -> Unit,
     onBack: () -> Unit,
-    onOpenVoiceLab: () -> Unit = {}
+    onOpenVoiceLab: () -> Unit = {},
+    sourceLabel: String = "MOCK · DEMO LOCAL"
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        FeatureHeader("TELEO MÚSICA", "EXPERIMENTAL", onBack)
+        FeatureHeader("TELEO MÚSICA", sourceLabel, onBack)
         Spacer(Modifier.height(20.dp))
         Icon(Icons.Default.LibraryMusic, null, tint = MusicCyan, modifier = Modifier.size(62.dp))
         Text(
@@ -444,6 +564,9 @@ fun MusicPlaybackScreen(
             Text(formatTime(state.playbackPositionMs), color = Color.White.copy(alpha = 0.62f), fontSize = 11.sp)
             Text(formatTime(state.timeline.durationMs), color = Color.White.copy(alpha = 0.62f), fontSize = 11.sp)
         }
+        if (BuildConfig.DEBUG && state.source == MusicExperienceSource.REMOTE) {
+            RemoteDebugPanel(state, adjustedPosition)
+        }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -497,6 +620,26 @@ fun MusicPlaybackScreen(
 }
 
 @Composable
+private fun RemoteDebugPanel(state: MusicExperienceState.Playing, timelinePositionMs: Long) {
+    val debug = state.remoteDebugInfo ?: return
+    val currentEvent = state.timeline.activeEventsAt(timelinePositionMs).firstOrNull()?.type?.name ?: "—"
+    val currentViseme = state.timeline.activeVisemeAt(timelinePositionMs)?.shape?.name ?: "—"
+    val currentHaptic = state.timeline.hapticEvents.firstOrNull { it.timestampMs in (timelinePositionMs - 80)..timelinePositionMs }?.type?.name ?: "—"
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 5.dp).testTag("music_remote_debug"),
+        color = Color.Black.copy(alpha = .6f), shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, MusicTeal.copy(alpha = .35f))
+    ) {
+        Text(
+            "REMOTE · ${debug.trackId} · schema ${debug.schemaVersion} · exp ${debug.experienceVersion} · ${debug.cacheStatus}\n" +
+                "pos ${formatTime(state.playbackPositionMs)} · event $currentEvent · visema $currentViseme · háptica $currentHaptic\n" +
+                "audio ${debug.audioDurationMs ?: "?"}/${debug.expectedDurationMs} ms · hash ${debug.audioHashStatus} · ${debug.downloadedBytes} B",
+            color = Color.White.copy(alpha = .76f), fontSize = 9.sp, modifier = Modifier.padding(7.dp)
+        )
+    }
+}
+
+@Composable
 private fun MusicVisualStage(
     timeline: MusicTimeline,
     positionMs: Long,
@@ -506,6 +649,7 @@ private fun MusicVisualStage(
     modifier: Modifier = Modifier
 ) {
     val lyric = timeline.activeLyricAt(positionMs)
+    val viseme = timeline.activeVisemeAt(positionMs)
     val interpolator = remember { LinearMusicFeatureInterpolator() }
     val features = interpolator.interpolate(timeline.featureFrames, positionMs)
     Box(
@@ -545,6 +689,22 @@ private fun MusicVisualStage(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                 )
+            }
+            viseme?.let {
+                Surface(
+                    modifier = Modifier.align(Alignment.Center).padding(top = 52.dp),
+                    color = MusicMagenta.copy(alpha = 0.18f),
+                    shape = CircleShape,
+                    border = BorderStroke(2.dp, MusicMagenta.copy(alpha = .75f))
+                ) {
+                    Text(
+                        it.shape.name,
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = (28 + it.intensity * 18).sp,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
+                    )
+                }
             }
             if (settings.intenseVisualWarningEnabled && settings.preset == VisualPreset.SYNESTHETIC && !settings.reducedMotion) {
                 Surface(
@@ -915,6 +1075,11 @@ private fun eventSymbol(type: MusicEventType): String = when (type) {
     MusicEventType.MELODY_DOWN -> "↓"
     MusicEventType.SECTION_START -> "§"
     MusicEventType.SECTION_END -> "×"
+    MusicEventType.TOM -> "T"
+    MusicEventType.CYMBAL -> "✦"
+    MusicEventType.GUITAR -> "G"
+    MusicEventType.PIANO -> "P"
+    MusicEventType.OTHER -> "·"
 }
 
 private data class LaneSpec(

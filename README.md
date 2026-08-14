@@ -4,57 +4,80 @@
 
 # Teleo
 
-Teleo es una aplicación enfocada en la comunicación en tiempo real, facilitando la interacción mediante tecnología de reconocimiento de voz y conectividad de proximidad.
+Teleo es un prototipo Android de accesibilidad y comunicación presencial. Convierte
+voz y mensajes en experiencias visuales y explora una representación visual/háptica
+de la música para personas sordas o con hipoacusia.
 
-## Características Principales
+## Estado actual
 
-- **Palabra Viva**: Visualización en tiempo real de lo que se está hablando.
-- **Escribir y Mostrar**: Interfaz simple para escribir mensajes y mostrarlos en pantalla completa.
-- **TeleoCerca**: Comunicación con dispositivos cercanos utilizando Google Nearby Connections.
-- **Reconocimiento de Voz**: Soporte para dictado y transcripción inmediata.
+- **Palabra Viva:** transcripción en vivo mediante el reconocimiento de voz de
+  Android.
+- **Escribir:** mensajes escritos presentados a gran tamaño.
+- **Teleo Cerca:** comunicación local entre dispositivos con Google Nearby
+  Connections, selección o QR de sesión y aprobación del host.
+- **Teleo Música — Experimental:** catálogo HTTPS de experiencias Kinetra Resonance,
+  audio local y visuales/háptica sincronizados por ExoPlayer. La demo Mock continúa
+  disponible de forma explícita.
+- **Voice Visual Lab:** laboratorio simulado de formas, vocales y partículas; todavía
+  no analiza micrófono ni audio.
 
-## Capturas de Pantalla
+La descripción técnica completa y verificable para personas y asistentes de IA está
+en **[Estado actual de Teleo](docs/PROJECT_CONTEXT.md)**. Las decisiones y límites
+específicos de la experiencia musical están en
+**[Teleo Música](docs/TELEO_MUSIC.md)**.
 
-<p align="center">
-  <img src="screenshots/home.png" width="30%" alt="Inicio">
-  <img src="screenshots/chat.png" width="30%" alt="Chat">
-  <img src="screenshots/voice.png" width="30%" alt="Voz">
-</p>
+## Stack
 
-## Tecnologías Utilizadas
+- Kotlin y Jetpack Compose/Material 3.
+- Android mínimo 8.0 (API 26), `compileSdk` y `targetSdk` 35.
+- Google Nearby Connections, Android Speech Recognition, CameraX y ML Kit Barcode.
+- Media3 ExoPlayer y AndroidX Graphics Shapes para Teleo Música.
 
-- **Kotlin** y **Jetpack Compose** para una interfaz moderna y reactiva.
-- **Google Nearby Connections API** para comunicación offline y local.
-- **Android Speech Recognition** para la captura de texto desde audio.
+## Compilar
 
-## Requisitos
+Abrir el proyecto en Android Studio con un SDK Android compatible o ejecutar:
 
-- Android SDK 35
-- Dispositivo con soporte para Bluetooth y Wi-Fi (para Nearby Connections)
-- Permisos de Micrófono y Ubicación
+```bash
+./gradlew assembleDebug --no-configuration-cache
+./gradlew testDebugUnitTest compileDebugAndroidTestKotlin --no-configuration-cache
+```
 
-## Instalación y Configuración
+Las pruebas instrumentadas requieren emulador o dispositivo:
 
-1. Clonar el repositorio:
-   ```bash
-   git clone https://github.com/nicobutter/teleo.git
-   ```
-2. Abrir el proyecto en Android Studio.
-3. Asegurarse de tener configurado el SDK de Android.
-4. Ejecutar el proyecto en un emulador o dispositivo físico.
+```bash
+./gradlew connectedDebugAndroidTest --no-configuration-cache
+```
 
-## Configuración de Entorno (.env)
+`deploy.sh` compila e instala el APK debug en un dispositivo conectado por USB. Si
+hay conflicto de firma, el script puede desinstalar primero la app y eliminar sus
+datos locales.
 
-El proyecto utiliza un archivo `.env` para gestionar variables sensibles. Asegúrate de crear uno basado en el ejemplo proporcionado.
+## Configuración local
 
-## Contacto
+El repositorio no carga `.env`. Para configurar el catálogo remoto, crear o editar
+`local.properties` (no versionado) con una URL HTTPS terminada en `/`:
 
-Desarrollado por **Nicolas Butterfield**
-- Email: [nicobutter@gmail.com](mailto:nicobutter@gmail.com)  
-- GitHub: [@nicobutter](https://github.com/nicobutter)
+```properties
+TELEO_MUSIC_BASE_URL=https://music.example.com/
+```
 
----
-Desarrollado para mejorar la comunicación.
+Sin esa propiedad, el build usa `https://music.teleo.invalid/`, una URL segura que
+no permite solicitudes HTTP por accidente. No se deben versionar `.env`,
+`local.properties`, keystores ni credenciales.
+
+## Alcance responsable
+
+Teleo Música no interactúa con implantes cocleares, no programa dispositivos médicos
+y no se presenta como tratamiento ni como recuperación de la audición. El análisis
+musical local todavía no está implementado: Teleo no ejecuta separación de stems ni
+IA musical. Las experiencias reales vienen de JSON temporal producido externamente
+por Kinetra Resonance; la demo Mock sigue usando datos simulados.
+
+## Autor
+
+Desarrollado por **Nicolas Butterfield** —
+[nicobutter@gmail.com](mailto:nicobutter@gmail.com) ·
+[@nicobutter](https://github.com/nicobutter)
 
 <p align="center">
   <a href="https://vetrabyte.com.ar/">

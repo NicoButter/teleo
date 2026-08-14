@@ -1,0 +1,34 @@
+{
+  "format": "teleo-music",
+  "version": 1,
+  "experienceVersion": 2,
+  "track": {
+    "id": "kinetra-fixture-01",
+    "title": "Fixture Resonance",
+    "artist": "Teleo Test",
+    "durationMs": 60000,
+    "sourceHash": { "algorithm": "sha256", "value": "abcd" }
+  },
+  "drums": { "events": [
+    { "startMs": 1000, "durationMs": 80, "type": "kick", "intensity": 0.9 },
+    { "startMs": 2000, "durationMs": 60, "type": "hi_hat", "intensity": 0.5 }
+  ] },
+  "bass": { "events": [ { "startMs": 1500, "durationMs": 300, "intensity": 0.7 } ] },
+  "guitar": { "events": [] },
+  "piano": { "events": [] },
+  "vocals": {
+    "events": [ { "startMs": 10000, "durationMs": 500, "intensity": 0.8 } ],
+    "visemes": [
+      { "startMs": 10000, "endMs": 10200, "shape": "G", "intensity": 0.72 },
+      { "startMs": 10200, "endMs": 10400, "shape": "X", "intensity": 0.3 }
+    ]
+  },
+  "other": { "events": [] },
+  "lyrics": [],
+  "sections": [ { "startMs": 0, "name": "intro" } ],
+  "haptics": [ { "startMs": 1000, "durationMs": 55, "type": "kick", "intensity": 0.9 } ],
+  "featureFrames": [
+    { "timestampMs": 0, "overallEnergy": 0.1 },
+    { "timestampMs": 1000, "beatPhase": 0.1, "beatStrength": 0.9, "lowEnergy": 0.8, "vocalPresence": 0.2, "overallEnergy": 0.7 }
+  ]
+}

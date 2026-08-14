@@ -6,6 +6,86 @@ Teleo Música es un prototipo experimental para representar una canción mediant
 
 La experiencia no interactúa con implantes cocleares, no programa dispositivos médicos y no se presenta como tratamiento ni como recuperación de la audición.
 
+## Runtime remoto Kinetra Resonance
+
+Teleo Música soporta dos fuentes explícitas:
+
+- **REMOTE:** Kinetra Resonance produce `teleo_experience.json`; Teleo descarga un
+  catálogo y la experiencia estática por HTTPS, valida el contrato, la cachea y la
+  reproduce sobre un audio local seleccionado por la persona.
+- **MOCK:** `MockMusicAnalyzer` permanece para demo, desarrollo y tests. Nunca se
+  usa como fallback silencioso de una experiencia remota.
+
+Teleo no analiza el audio ni ejecuta separación de stems, Demucs, RoFormer,
+Rhubarb o IA musical. Es el runtime player + renderer. `ExoPlayer.currentPosition`
+sigue siendo la única referencia temporal para eventos, letras, visemas, visuales y
+háptica; los relojes de frame solo mueven la física visual.
+
+### Configuración Android
+
+Crear o editar `local.properties` en la raíz, sin versionarlo:
+
+```properties
+TELEO_MUSIC_BASE_URL=https://music.example.com/
+```
+
+Gradle genera `BuildConfig.TELEO_MUSIC_BASE_URL`. Sin configuración, usa
+`https://music.teleo.invalid/`; así development no habilita HTTP accidentalmente.
+Solo se aceptan URLs de experiencia relativas a esa base. La app declara
+`INTERNET`, pero no habilita cleartext HTTP global.
+
+### Contrato estático v1
+
+`GET <BASE>/catalog.json`:
+
+```json
+{
+  "format": "teleo-music-catalog",
+  "version": 1,
+  "tracks": [{
+    "id": "track-id",
+    "title": "Título",
+    "artist": "Artista opcional",
+    "durationMs": 253794,
+    "experienceVersion": 1,
+    "quality": "AUTOMATIC",
+    "experienceUrl": "tracks/track-id/experience.json",
+    "sourceHash": { "algorithm": "sha256", "value": "opcional" }
+  }]
+}
+```
+
+`GET <BASE>/tracks/<track-id>/experience.json` requiere `format: "teleo-music"`,
+`version: 1` y un `track` que coincida en `id` y `durationMs` con el catálogo. Los
+canales opcionales son `drums.events`, `bass.events`, `guitar.events`,
+`piano.events`, `vocals.events`, `vocals.visemes`, `other.events`, `lyrics`,
+`sections`, `haptics` y `featureFrames`. Cada evento temporal usa `startMs`,
+`durationMs` o `endMs`, `intensity` y, si corresponde, `type`/`label`.
+
+Los visemas usan códigos visuales Rhubarb `A B C D E F G H X`; no son etiquetas de
+fonemas. Teleo los consulta con búsqueda binaria según `startMs <= position < endMs`
+y hoy los muestra como señal visual sincronizada. La futura capa
+`TeleoArticulationMapper → MouthPose` podrá consumir el mismo dominio.
+
+La versión de esquema (`version`) y la revisión concreta (`experienceVersion`) son
+independientes. Una versión de esquema desconocida se rechaza con “Esta experiencia
+requiere una versión más reciente de Teleo.”
+
+### Caché, offline y audio local
+
+La caché vive en `filesDir/music_timelines/remote`: catálogo y, por track,
+`experience.json` + `metadata.json` con track ID, versiones, fecha y URL. Las
+escrituras son temporales y luego se reemplazan; una experiencia sin metadata no se
+considera válida. Si no hay red se usa la experiencia cacheada válida. Si el catálogo
+sube `experienceVersion`, se descarga la nueva versión. JSON inválido o truncado de
+caché se descarta antes de volver a descargar.
+
+El audio no se descarga ni se copia. Teleo valida duración con tolerancia central
+`AudioValidationConfig.DURATION_TOLERANCE_MS` (1.500 ms). Si existe
+`sourceHash.sha256`, calcula SHA-256 del URI en `Dispatchers.IO`; una discrepancia
+impide iniciar la experiencia. Sin hash se permite la coincidencia de duración y el
+estado `NOT_AVAILABLE` queda disponible para debug.
+
 ## Arquitectura
 
 Teleo utiliza Compose y navegación manual con `Screen`. Las funciones históricas permanecen en `MainActivity` y conservan su diseño horizontal. Teleo Música abre `MusicActivity`, una actividad interna dedicada y bloqueada en retrato para ofrecer una escena vertical más alta sin rotar ni reiniciar las demás experiencias. Toda la implementación nueva vive bajo `com.nicolas.teleo.features.music`:
@@ -268,4 +348,40 @@ Las pruebas instrumentadas Compose requieren un emulador o dispositivo:
 9. Exportación e importación de timelines.
 10. Procesamiento opcional en computadora o servidor.
 
-El siguiente paso técnico más pequeño es decodificar PCM mono en una ventana corta con MediaExtractor/MediaCodec, calcular energía RMS por bloques y aplicar detección de picos con umbral adaptativo. Eso permitiría reemplazar únicamente los golpes periódicos del mock por candidatos de pulso reales, manteniendo intactos el modelo, caché, búfer, UI, reproducción y motor háptico.
+El siguiente incremento debe usar un JSON real producido por Kinetra Resonance y
+verificar visualmente que los eventos, el visema y la háptica cambian al hacer seek.
+El análisis PCM local propuesto anteriormente ya no es el siguiente paso de producto:
+el análisis pertenece a Kinetra, no al teléfono.
+
+## READY FOR VPS TEST
+
+Subir contenido público estático, sin API ni autenticación:
+
+```text
+<document-root>/catalog.json
+<document-root>/tracks/<track-id>/experience.json
+```
+
+En el teléfono/build local configurar:
+
+```properties
+TELEO_MUSIC_BASE_URL=https://music.example.com/
+```
+
+Usar para la primera prueba un `experience.json` real de Kinetra con el contrato v1
+descrito arriba: `format: teleo-music`, `version: 1`, track ID/duración idénticos a
+`catalog.json`, eventos de batería, `haptics` y, si está disponible,
+`vocals.visemes`. Si Kinetra produce SHA-256, publicar el mismo `sourceHash` en
+catálogo o track de experiencia; debe corresponder al archivo de audio que se elija
+localmente.
+
+Prueba desde el teléfono:
+
+1. Recompilar tras modificar `local.properties` e instalar el APK debug.
+2. Abrir **Teleo Música** y pulsar **Actualizar**.
+3. Elegir la card remota, esperar la descarga y seleccionar el audio local exacto.
+4. Confirmar **Preparar experiencia** y reproducir.
+5. En debug, comprobar `pos`, `event`, `visema` y `háptica`; hacer seek hacia
+   adelante y atrás y confirmar que se actualizan de inmediato.
+6. Cerrar la app, desconectar Internet y repetir: debe indicar caché/offline y
+   seguir permitiendo la experiencia ya descargada.

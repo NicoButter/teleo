@@ -7,6 +7,8 @@ import com.nicolas.teleo.features.music.domain.MusicEventType
 import com.nicolas.teleo.features.music.domain.MusicFeatureFrame
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.TimedLyricWord
+import com.nicolas.teleo.features.music.domain.VocalVisemeEvent
+import com.nicolas.teleo.features.music.domain.VocalVisemeShape
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -113,6 +115,27 @@ object MusicTimelineJson {
                 })
             }
         })
+        put("visemes", JSONArray().apply {
+            timeline.visemes.forEach { viseme ->
+                put(JSONObject().apply {
+                    put("startMs", viseme.startMs)
+                    put("endMs", viseme.endMs)
+                    put("shape", viseme.shape.name)
+                    put("intensity", viseme.intensity.toDouble())
+                })
+            }
+        })
+        put("hapticEvents", JSONArray().apply {
+            timeline.hapticEvents.forEach { event ->
+                put(JSONObject().apply {
+                    put("timestampMs", event.timestampMs)
+                    put("durationMs", event.durationMs)
+                    put("type", event.type.name)
+                    put("intensity", event.intensity.toDouble())
+                    put("label", event.label ?: JSONObject.NULL)
+                })
+            }
+        })
     }.toString()
 
     fun decode(json: String): MusicTimeline {
@@ -184,6 +207,29 @@ object MusicTimelineJson {
                 )
             }
         }
+        val visemeArray = root.optJSONArray("visemes")
+        val visemes = buildList {
+            if (visemeArray != null) for (index in 0 until visemeArray.length()) {
+                val item = visemeArray.getJSONObject(index)
+                add(VocalVisemeEvent(
+                    item.getLong("startMs"),
+                    item.getLong("endMs"),
+                    VocalVisemeShape.fromWire(item.getString("shape")),
+                    item.optDouble("intensity", 1.0).toFloat()
+                ))
+            }
+        }
+        fun decodeEvents(array: JSONArray): List<MusicEvent> = buildList {
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                add(MusicEvent(
+                    item.getLong("timestampMs"), item.getLong("durationMs"),
+                    MusicEventType.valueOf(item.getString("type")), item.getDouble("intensity").toFloat(),
+                    item.optString("label").takeIf { !item.isNull("label") }
+                ))
+            }
+        }
+        val hapticEvents = root.optJSONArray("hapticEvents")?.let(::decodeEvents) ?: events
         return MusicTimeline(
             trackId = root.getString("trackId"),
             durationMs = root.getLong("durationMs"),
@@ -191,7 +237,9 @@ object MusicTimelineJson {
             analysisVersion = root.getInt("analysisVersion"),
             events = events,
             lyrics = lyrics,
-            featureFrames = featureFrames
+            featureFrames = featureFrames,
+            visemes = visemes,
+            hapticEvents = hapticEvents
         )
     }
 }

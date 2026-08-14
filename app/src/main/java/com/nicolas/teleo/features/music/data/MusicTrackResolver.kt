@@ -6,6 +6,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.nicolas.teleo.features.music.domain.MusicTrack
 import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object MusicTrackResolver {
     fun resolve(context: Context, uri: Uri): MusicTrack {
@@ -45,5 +47,19 @@ object MusicTrackResolver {
             .digest(stableMetadata.toByteArray())
             .joinToString("") { "%02x".format(it) }
         return MusicTrack(hash, displayName, artist, uri.toString(), duration)
+    }
+
+    /** Content hashing is intentionally opt-in and always runs off the main thread. */
+    suspend fun sha256(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
+        val digest = MessageDigest.getInstance("SHA-256")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        } ?: throw IllegalStateException("No se pudo abrir el audio seleccionado")
+        digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

@@ -19,7 +19,12 @@ enum class MusicEventType {
     KICK,
     SNARE,
     HI_HAT,
+    TOM,
+    CYMBAL,
     BASS,
+    GUITAR,
+    PIANO,
+    OTHER,
     VOCAL_START,
     VOCAL_END,
     MELODY_UP,
@@ -49,7 +54,10 @@ data class MusicTimeline(
     val analysisVersion: Int,
     val events: List<MusicEvent>,
     val lyrics: List<TimedLyricLine>,
-    val featureFrames: List<MusicFeatureFrame> = emptyList()
+    val featureFrames: List<MusicFeatureFrame> = emptyList(),
+    val visemes: List<VocalVisemeEvent> = emptyList(),
+    /** Empty means that this experience intentionally has no haptic channel. */
+    val hapticEvents: List<MusicEvent> = events
 ) {
     init {
         require(trackId.isNotBlank()) { "Timeline track id cannot be blank" }
@@ -64,6 +72,12 @@ data class MusicTimeline(
         }
         require(featureFrames.zipWithNext().all { (a, b) -> a.timestampMs <= b.timestampMs }) {
             "Music feature frames must be ordered chronologically"
+        }
+        require(visemes.zipWithNext().all { (a, b) -> a.startMs <= b.startMs }) {
+            "Visemes must be ordered chronologically"
+        }
+        require(hapticEvents.zipWithNext().all { (a, b) -> a.timestampMs <= b.timestampMs }) {
+            "Haptic events must be ordered chronologically"
         }
     }
 }
@@ -126,6 +140,16 @@ enum class HapticIntensity(val multiplier: Float, val label: String) {
 
 sealed interface MusicExperienceState {
     data object Idle : MusicExperienceState
+    data object LoadingCatalog : MusicExperienceState
+    data class CatalogReady(
+        val catalog: TeleoMusicCatalog,
+        val isOfflineCache: Boolean,
+        val warning: String? = null
+    ) : MusicExperienceState
+    data class DownloadingExperience(val track: TeleoMusicCatalogTrack) : MusicExperienceState
+    data class AwaitingAudio(val experience: RemoteMusicExperience, val validationError: String? = null) : MusicExperienceState
+    data class ValidatingAudio(val experience: RemoteMusicExperience) : MusicExperienceState
+    data class RemoteReady(val track: MusicTrack, val experience: RemoteMusicExperience) : MusicExperienceState
     data class TrackSelected(val track: MusicTrack) : MusicExperienceState
     data class Analyzing(val track: MusicTrack, val progress: MusicAnalysisProgress) : MusicExperienceState
     data class Countdown(val secondsRemaining: Int) : MusicExperienceState
@@ -138,7 +162,9 @@ sealed interface MusicExperienceState {
         val hapticSettings: HapticSettings,
         val visualSettings: MusicVisualSettings,
         val syncOffsetMs: Int,
-        val isRecoveringBuffer: Boolean
+        val isRecoveringBuffer: Boolean,
+        val source: MusicExperienceSource = MusicExperienceSource.MOCK,
+        val remoteDebugInfo: RemotePlaybackDebugInfo? = null
     ) : MusicExperienceState
     data class Error(val message: String, val recoverable: Boolean) : MusicExperienceState
 }

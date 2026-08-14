@@ -260,6 +260,10 @@ class DeterministicMusicVisualEngine(
         MusicEventType.VOCAL_START, MusicEventType.VOCAL_END -> VisualInstrument.VOICE in settings.visibleInstruments
         MusicEventType.MELODY_UP, MusicEventType.MELODY_DOWN ->
             VisualInstrument.GUITAR in settings.visibleInstruments || VisualInstrument.PIANO in settings.visibleInstruments
+        MusicEventType.TOM, MusicEventType.CYMBAL -> VisualInstrument.RHYTHM in settings.visibleInstruments
+        MusicEventType.GUITAR -> VisualInstrument.GUITAR in settings.visibleInstruments
+        MusicEventType.PIANO -> VisualInstrument.PIANO in settings.visibleInstruments
+        MusicEventType.OTHER -> false
     }
 
     private fun trackFrameTime(deltaTimeSeconds: Float) {
