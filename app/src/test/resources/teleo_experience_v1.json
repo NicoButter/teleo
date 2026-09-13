@@ -9,21 +9,31 @@
     "durationMs": 60000,
     "sourceHash": { "algorithm": "sha256", "value": "abcd" }
   },
+  "channelsQuality": {
+    "drums": { "status": "reliable", "score": 0.9582, "warnings": [], "metrics": { "eventCount": 1244, "unclassifiedCount": 65, "unclassifiedRatio": 0.0523 } },
+    "bass": { "status": "reliable", "score": 0.81, "warnings": ["short-window"], "metrics": { "noteCount": 420, "medianConfidence": 0.73 } },
+    "vocals": { "status": "reliable", "score": 0.92, "warnings": [], "metrics": { "frameCount": 3001, "voicedRatio": 0.64 } },
+    "other": { "status": "unreliable", "score": 0.31, "warnings": ["sparse"], "metrics": { "frameCount": 18 } },
+    "guitar": { "status": "unknown", "score": null, "warnings": [], "metrics": { "model": "future" } },
+    "piano": { "status": "unknown", "score": null, "warnings": [], "metrics": {} },
+    "timeline": { "status": "reliable", "score": 1.0, "warnings": [], "metrics": { "eventCount": 2 } }
+  },
   "drums": { "events": [
     { "startMs": 1000, "durationMs": 80, "type": "kick", "intensity": 0.9 },
     { "startMs": 2000, "durationMs": 60, "type": "hi_hat", "intensity": 0.5 }
   ] },
-  "bass": { "events": [ { "startMs": 1500, "durationMs": 300, "intensity": 0.7 } ] },
-  "guitar": { "events": [] },
-  "piano": { "events": [] },
+  "bass": { "notes": [ { "startMs": 1500, "endMs": 1800, "midi": 42, "intensity": 0.7, "confidence": 0.91 } ] },
+  "guitar": { "notes": [] },
+  "piano": { "notes": [] },
   "vocals": {
-    "events": [ { "startMs": 10000, "durationMs": 500, "intensity": 0.8 } ],
+    "frames": [ { "timestampMs": 9900, "presence": 0.2, "intensity": 0.3, "pitchHz": null, "pitchNormalized": null, "pitchConfidence": 0.1, "spectralBrightness": 0.2 }, { "timestampMs": 10100, "presence": 0.8, "intensity": 0.7, "pitchHz": 220.0, "pitchNormalized": 0.62, "pitchConfidence": 0.9, "spectralBrightness": 0.8 } ],
     "visemes": [
       { "startMs": 10000, "endMs": 10200, "shape": "G", "intensity": 0.72 },
       { "startMs": 10200, "endMs": 10400, "shape": "X", "intensity": 0.3 }
     ]
   },
-  "other": { "events": [] },
+  "other": { "frames": [ { "timestampMs": 0, "lowEnergy": 0.1, "midEnergy": 0.2, "highEnergy": 0.3, "overallEnergy": 0.2 }, { "timestampMs": 1170, "lowEnergy": 0.8, "midEnergy": 0.4, "highEnergy": 0.2, "overallEnergy": 0.6 } ] },
+  "timeline": { "events": [ { "startMs": 1100, "durationMs": 20, "type": "kick", "intensity": 0.9 } ] },
   "lyrics": [],
   "sections": [ { "startMs": 0, "name": "intro" } ],
   "haptics": [ { "startMs": 1000, "durationMs": 55, "type": "kick", "intensity": 0.9 } ],

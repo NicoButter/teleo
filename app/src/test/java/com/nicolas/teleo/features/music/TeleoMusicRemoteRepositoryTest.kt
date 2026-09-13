@@ -6,6 +6,7 @@ import com.nicolas.teleo.features.music.data.MusicCatalogRemoteDataSource
 import com.nicolas.teleo.features.music.data.RemoteDocument
 import com.nicolas.teleo.features.music.data.TeleoExperienceRemoteDataSource
 import com.nicolas.teleo.features.music.data.TeleoMusicDtoMapper
+import com.nicolas.teleo.features.music.data.TeleoExperienceDto
 import com.nicolas.teleo.features.music.data.TeleoMusicRemoteException
 import com.nicolas.teleo.features.music.data.resolveRelativeExperienceUrl
 import com.nicolas.teleo.features.music.domain.AudioHashStatus
@@ -18,6 +19,7 @@ import com.nicolas.teleo.features.music.domain.activeVisemeAt
 import com.nicolas.teleo.features.music.domain.validateAudioDuration
 import java.net.URI
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -44,6 +46,10 @@ class TeleoMusicRemoteRepositoryTest {
         assertEquals(VocalVisemeShape.X, parsed.timeline.activeVisemeAt(10_300)?.shape)
         assertNull(parsed.timeline.activeVisemeAt(10_400))
         assertEquals("abcd", parsed.sourceHash?.value)
+        assertEquals(42, parsed.experience.bassNotes.single().midi)
+        assertEquals(2, parsed.experience.vocalFrames.size)
+        assertEquals(2, parsed.experience.ambientFrames.size)
+        assertTrue(!parsed.experience.isReliable("other"))
     }
 
     @Test fun `unsupported schemas and unsafe experience urls are rejected`() {
@@ -85,7 +91,7 @@ class TeleoMusicRemoteRepositoryTest {
         val raw = """{
           "format":"teleo-music","version":1,"experienceVersion":2,
           "track":{"id":"kinetra-fixture-01","title":"Fixture","durationMs":60000},
-          "channelsQuality":{"drums":"reliable","bass":"unreliable","vocals":"reliable","other":"reliable"},
+          "channelsQuality":{"drums":{"status":"reliable","score":0.9,"warnings":[],"metrics":{"eventCount":1}},"bass":{"status":"unreliable","score":0.2,"warnings":[],"metrics":{"noteCount":1}},"vocals":{"status":"reliable","score":1.0,"warnings":[],"metrics":{"frameCount":1}},"other":{"status":"reliable","score":1.0,"warnings":[],"metrics":{"frameCount":1}}},
           "drums":{"events":[{"startMs":10,"durationMs":30,"type":"snare","intensity":0.8}]},
           "bass":{"notes":[{"startMs":20,"endMs":80,"midi":40,"intensity":0.7,"confidence":0.9}]},
           "vocals":{"frames":[{"timestampMs":15,"presence":0.6,"pitchNormalized":1.4,"pitchConfidence":0.9}],"visemes":[{"startMs":20,"endMs":40,"shape":"F"}]},
@@ -100,6 +106,17 @@ class TeleoMusicRemoteRepositoryTest {
         assertEquals(1, parsed.ambientFrames.size)
         assertTrue(parsed.isReliable("drums"))
         assertTrue(!parsed.isReliable("bass"))
+    }
+
+    @Test fun `real quality fixture keeps heterogeneous channel metrics forward compatible`() {
+        val dto = Json { ignoreUnknownKeys = true }.decodeFromString(TeleoExperienceDto.serializer(), experienceJson)
+        assertEquals("reliable", dto.channelsQuality.drums?.status)
+        assertEquals("1244", dto.channelsQuality.drums?.metrics?.get("eventCount")?.toString())
+        assertEquals("0.73", dto.channelsQuality.bass?.metrics?.get("medianConfidence")?.toString())
+        assertEquals("future", dto.channelsQuality.guitar?.metrics?.get("model")?.toString()?.trim('"'))
+        assertEquals(0, dto.guitar.notes.size)
+        assertEquals(0, dto.piano.notes.size)
+        assertEquals(1, dto.timeline.events.size)
     }
 
     @Test fun `local import reuses protocol validation without a catalog or remote source`() {

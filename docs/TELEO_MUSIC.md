@@ -61,11 +61,18 @@ cleartext HTTP global.
 ```
 
 `GET <BASE>/tracks/<track-id>/experience.json` requiere `format: "teleo-music"`,
-`version: 1` y un `track` que coincida en `id` y `durationMs` con el catálogo. Los
-canales opcionales son `drums.events`, `bass.events`, `guitar.events`,
-`piano.events`, `vocals.events`, `vocals.visemes`, `other.events`, `lyrics`,
-`sections`, `haptics` y `featureFrames`. Cada evento temporal usa `startMs`,
-`durationMs` o `endMs`, `intensity` y, si corresponde, `type`/`label`.
+`version: 1` y un `track` que coincida en `id` y `durationMs` con el catálogo. El
+export actual de Kinetra usa `drums.events`, `bass.notes`, `guitar.notes`,
+`piano.notes`, `vocals.frames`, `vocals.visemes`, `other.frames`, `timeline.events`,
+`lyrics`, `sections` y `haptics`; todos los arrays pueden estar vacíos. Los eventos
+temporales usan `startMs`, `durationMs` o `endMs`, `intensity` y, si corresponde,
+`type`/`label`.
+
+`channelsQuality` es un objeto por canal, no un mapa de strings. Cada entrada expone
+`status`, `score`, `warnings` y `metrics`; este último conserva un objeto JSON libre
+porque sus métricas varían por canal. El runtime usa `status` (`reliable`,
+`unreliable` o conservador ante desconocidos) y deja las métricas disponibles para
+diagnóstico/future compatibility sin imponerles un esquema rígido.
 
 Los visemas usan códigos visuales Rhubarb `A B C D E F G H X`; no son etiquetas de
 fonemas. Teleo los consulta con búsqueda binaria según `startMs <= position < endMs`

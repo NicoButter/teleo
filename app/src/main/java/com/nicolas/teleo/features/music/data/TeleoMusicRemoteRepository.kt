@@ -32,6 +32,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -297,7 +298,7 @@ data class TeleoExperienceDto(
     val vocals: VocalsChannelDto = VocalsChannelDto(),
     val other: OtherChannelDto = OtherChannelDto(),
     val timeline: TimelineDto = TimelineDto(),
-    val channelsQuality: Map<String, String> = emptyMap(),
+    val channelsQuality: ChannelsQualityDto = ChannelsQualityDto(),
     val lyrics: List<LyricDto> = emptyList(),
     val sections: List<SectionDto> = emptyList(),
     val haptics: List<TimedEventDto> = emptyList(),
@@ -306,6 +307,32 @@ data class TeleoExperienceDto(
 
 @Serializable data class ExperienceTrackDto(val id: String, val title: String, val artist: String? = null, val durationMs: Long, val sourceHash: SourceHashDto? = null)
 @Serializable data class TimedChannelDto(val events: List<TimedEventDto> = emptyList(), val notes: List<BassNoteDto> = emptyList())
+@Serializable
+data class ChannelQualityDto(
+    val status: String = "unknown",
+    val score: Float? = null,
+    val warnings: List<String> = emptyList(),
+    val metrics: JsonObject = JsonObject(emptyMap())
+)
+@Serializable
+data class ChannelsQualityDto(
+    val drums: ChannelQualityDto? = null,
+    val bass: ChannelQualityDto? = null,
+    val guitar: ChannelQualityDto? = null,
+    val piano: ChannelQualityDto? = null,
+    val vocals: ChannelQualityDto? = null,
+    val other: ChannelQualityDto? = null,
+    val timeline: ChannelQualityDto? = null,
+    val lyrics: ChannelQualityDto? = null,
+    val sections: ChannelQualityDto? = null,
+    val haptics: ChannelQualityDto? = null
+) {
+    fun asMap(): Map<String, ChannelQualityDto> = listOfNotNull(
+        drums?.let { "drums" to it }, bass?.let { "bass" to it }, guitar?.let { "guitar" to it },
+        piano?.let { "piano" to it }, vocals?.let { "vocals" to it }, other?.let { "other" to it },
+        timeline?.let { "timeline" to it }, lyrics?.let { "lyrics" to it }, sections?.let { "sections" to it }, haptics?.let { "haptics" to it }
+    ).toMap()
+}
 @Serializable data class VocalsChannelDto(val events: List<TimedEventDto> = emptyList(), val frames: List<VocalFrameDto> = emptyList(), val visemes: List<VisemeDto> = emptyList())
 @Serializable data class OtherChannelDto(val events: List<TimedEventDto> = emptyList(), val frames: List<AmbientFrameDto> = emptyList())
 @Serializable data class TimelineDto(val events: List<TimedEventDto> = emptyList())
@@ -337,8 +364,11 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
         val events = buildList {
             addAll(dto.drums.events.map { it.toEvent(drumType(it.type)) })
             addAll(dto.bass.events.map { it.toEvent(MusicEventType.BASS) })
+            addAll(dto.bass.notes.map { it.toEvent(MusicEventType.BASS) })
             addAll(dto.guitar.events.map { it.toEvent(MusicEventType.GUITAR) })
             addAll(dto.piano.events.map { it.toEvent(MusicEventType.PIANO) })
+            addAll(dto.guitar.notes.map { it.toEvent(MusicEventType.GUITAR) })
+            addAll(dto.piano.notes.map { it.toEvent(MusicEventType.PIANO) })
             addAll(dto.vocals.events.map { it.toEvent(vocalType(it.type)) })
             addAll(dto.other.events.map { it.toEvent(MusicEventType.OTHER) })
             addAll(dto.timeline.events.map { it.toEvent(MusicEventType.OTHER) })
@@ -362,7 +392,7 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
             visemes = visemes,
             ambientFrames = ambientFrames.sortedBy(TeleoAmbientFrame::timestampMs),
             timelineEvents = events,
-            channelQuality = dto.channelsQuality.mapValues { (_, value) -> when (value.lowercase()) { "reliable" -> TeleoChannelQuality.RELIABLE; "unreliable" -> TeleoChannelQuality.UNRELIABLE; else -> TeleoChannelQuality.UNKNOWN } }
+            channelQuality = dto.channelsQuality.asMap().mapValues { (_, quality) -> quality.status.toTeleoChannelQuality() }
         )
         return ParsedExperience(dto.version, experience, MusicTimeline(catalogTrack.id, dto.track.durationMs, null, catalogTrack.experienceVersion, events, lyrics, frames, visemes, haptics), dto.track.sourceHash?.toDomain())
     }
@@ -400,6 +430,8 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
     }
 
     private fun TimedEventDto.toEvent(fallback: MusicEventType) = MusicEvent(startMs, endMs?.minus(startMs)?.coerceAtLeast(0) ?: durationMs, type?.let(::eventType) ?: fallback, intensity.coerceIn(0f, 1f), label)
+    private fun BassNoteDto.toEvent(type: MusicEventType) = MusicEvent(startMs, endMs?.minus(startMs)?.coerceAtLeast(0) ?: durationMs, type, intensity.coerceIn(0f, 1f))
+    private fun String.toTeleoChannelQuality(): TeleoChannelQuality = when (lowercase()) { "reliable" -> TeleoChannelQuality.RELIABLE; "unreliable" -> TeleoChannelQuality.UNRELIABLE; else -> TeleoChannelQuality.UNKNOWN }
     private fun drumType(type: String?): MusicEventType = when (type?.lowercase()?.replace('-', '_')) {
         "kick", "bass_drum" -> MusicEventType.KICK
         "snare" -> MusicEventType.SNARE
