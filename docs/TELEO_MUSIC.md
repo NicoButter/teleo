@@ -21,18 +21,20 @@ Rhubarb o IA musical. Es el runtime player + renderer. `ExoPlayer.currentPositio
 sigue siendo la única referencia temporal para eventos, letras, visemas, visuales y
 háptica; los relojes de frame solo mueven la física visual.
 
-### Configuración Android
+### Servidores Resonance self-hosted
 
-Crear o editar `local.properties` en la raíz, sin versionarlo:
+La pantalla **Servidores** de Teleo Música administra perfiles locales con UUID,
+nombre, URL base HTTPS, activación y último sync. La URL requiere host, no acepta
+usuario/contraseña y se normaliza con `/` final. Un perfil puede no usar
+autenticación o usar Bearer: el token no forma parte del perfil y se guarda cifrado
+AES-GCM en preferencias privadas, con la clave en Android Keystore.
 
-```properties
-TELEO_MUSIC_BASE_URL=https://music.example.com/
-```
-
-Gradle genera `BuildConfig.TELEO_MUSIC_BASE_URL`. Sin configuración, usa
-`https://music.teleo.invalid/`; así development no habilita HTTP accidentalmente.
-Solo se aceptan URLs de experiencia relativas a esa base. La app declara
-`INTERNET`, pero no habilita cleartext HTTP global.
+Los catálogos de todos los perfiles habilitados se combinan sin federación: cada
+track conserva `serverId`, por lo que su identidad efectiva es `(serverId, trackId)`.
+Una falla usa el catálogo offline de ese servidor cuando existe y no invalida los
+demás. Las URLs de experiencia deben ser relativas, mantenerse bajo la misma base y
+no se siguen redirects a otro host. La app declara `INTERNET`, pero no habilita
+cleartext HTTP global.
 
 ### Contrato estático v1
 
@@ -73,12 +75,14 @@ requiere una versión más reciente de Teleo.”
 
 ### Caché, offline y audio local
 
-La caché vive en `filesDir/music_timelines/remote`: catálogo y, por track,
-`experience.json` + `metadata.json` con track ID, versiones, fecha y URL. Las
-escrituras son temporales y luego se reemplazan; una experiencia sin metadata no se
-considera válida. Si no hay red se usa la experiencia cacheada válida. Si el catálogo
-sube `experienceVersion`, se descarga la nueva versión. JSON inválido o truncado de
-caché se descarta antes de volver a descargar.
+La caché vive en `filesDir/music_timelines/remote/<server-id>`: catálogo y, por
+track, `experience.json` + `metadata.json` con track ID, versiones, fecha y URL.
+Las escrituras son temporales y luego se reemplazan; una experiencia sin metadata no
+se considera válida. Si no hay red se usa la experiencia cacheada válida del mismo
+servidor. Si el catálogo sube `experienceVersion`, se descarga la nueva versión.
+JSON inválido o truncado de caché se descarta antes de volver a descargar. Eliminar
+un servidor elimina también su credencial y caché; cambiar su URL limpia la caché y
+reinicia `lastSync`.
 
 El audio no se descarga ni se copia. Teleo valida duración con tolerancia central
 `AudioValidationConfig.DURATION_TOLERANCE_MS` (1.500 ms). Si existe
@@ -106,7 +110,11 @@ Esta separación permite extraer la funcionalidad a un módulo Gradle propio má
 - `androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7` para conservar y exponer el estado del feature.
 - `androidx.graphics:graphics-shapes:1.1.0` para construir siluetas orgánicas compatibles y producir transiciones vectoriales con `RoundedPolygon` y `Morph` dentro de Compose Canvas.
 
-Coroutines y Lifecycle ya formaban parte de las dependencias transitivas/actuales. El JSON usa `org.json`, igual que el código existente, por lo que no se agregó una biblioteca de serialización. No se agregó Media3 Session porque esta etapa no reproduce fuera de la actividad ni publica controles del sistema. Tampoco se agregó WorkManager: el análisis simulado es corto y se cancela junto con el ViewModel.
+Coroutines y Lifecycle ya formaban parte de las dependencias transitivas/actuales. El
+parser de catálogo y experiencia usa Kotlinx Serialization JSON (`1.8.1`), ya
+declarado en Gradle; no usa `org.json`. No se agregó Media3 Session porque esta etapa
+no reproduce fuera de la actividad ni publica controles del sistema. Tampoco se
+agregó WorkManager: el análisis simulado es corto y se cancela junto con el ViewModel.
 
 No se agregó `graphics-path`: `graphics-shapes` ya convierte el resultado del morph a un `android.graphics.Path`, que Compose puede dibujar directamente, y el laboratorio no inspecciona segmentos. Tampoco se incorporaron Rive, Lottie, libGDX, motores de juegos ni sistemas de partículas externos.
 
@@ -355,18 +363,15 @@ el análisis pertenece a Kinetra, no al teléfono.
 
 ## READY FOR VPS TEST
 
-Subir contenido público estático, sin API ni autenticación:
+Subir contenido estático HTTPS; puede ser público o requerir Bearer:
 
 ```text
 <document-root>/catalog.json
 <document-root>/tracks/<track-id>/experience.json
 ```
 
-En el teléfono/build local configurar:
-
-```properties
-TELEO_MUSIC_BASE_URL=https://music.example.com/
-```
+En el teléfono, abrir **Teleo Música → Servidores**, agregar la URL base y, si el
+host lo requiere, seleccionar Bearer e ingresar el token.
 
 Usar para la primera prueba un `experience.json` real de Kinetra con el contrato v1
 descrito arriba: `format: teleo-music`, `version: 1`, track ID/duración idénticos a
@@ -377,8 +382,8 @@ localmente.
 
 Prueba desde el teléfono:
 
-1. Recompilar tras modificar `local.properties` e instalar el APK debug.
-2. Abrir **Teleo Música** y pulsar **Actualizar**.
+1. Instalar el APK debug, configurar el servidor y pulsar **Probar**.
+2. Abrir el catálogo y pulsar **Actualizar**.
 3. Elegir la card remota, esperar la descarga y seleccionar el audio local exacto.
 4. Confirmar **Preparar experiencia** y reproducir.
 5. En debug, comprobar `pos`, `event`, `visema` y `háptica`; hacer seek hacia

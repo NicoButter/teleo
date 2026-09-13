@@ -54,16 +54,10 @@ datos locales.
 
 ## Configuración local
 
-El repositorio no carga `.env`. Para configurar el catálogo remoto, crear o editar
-`local.properties` (no versionado) con una URL HTTPS terminada en `/`:
-
-```properties
-TELEO_MUSIC_BASE_URL=https://music.example.com/
-```
-
-Sin esa propiedad, el build usa `https://music.teleo.invalid/`, una URL segura que
-no permite solicitudes HTTP por accidente. No se deben versionar `.env`,
-`local.properties`, keystores ni credenciales.
+Teleo Música configura servidores Resonance desde su pantalla **Servidores**. Cada
+perfil exige una URL HTTPS, puede usar Bearer y se guarda en el almacenamiento
+privado de la app; los tokens se cifran mediante Android Keystore. No se deben
+versionar `.env`, `local.properties`, keystores ni credenciales.
 
 ## Alcance responsable
 

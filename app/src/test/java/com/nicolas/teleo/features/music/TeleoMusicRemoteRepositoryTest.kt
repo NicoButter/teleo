@@ -12,6 +12,7 @@ import com.nicolas.teleo.features.music.domain.AudioHashStatus
 import com.nicolas.teleo.features.music.domain.AudioValidationResult
 import com.nicolas.teleo.features.music.domain.MusicEventType
 import com.nicolas.teleo.features.music.domain.RemoteCacheStatus
+import com.nicolas.teleo.features.music.domain.ResonanceServerProfile
 import com.nicolas.teleo.features.music.domain.VocalVisemeShape
 import com.nicolas.teleo.features.music.domain.activeVisemeAt
 import com.nicolas.teleo.features.music.domain.validateAudioDuration
@@ -23,6 +24,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TeleoMusicRemoteRepositoryTest {
+    private val serverId = "11111111-1111-1111-1111-111111111111"
+    private val profile = ResonanceServerProfile(id = serverId, name = "Test", baseUrl = "https://music.example.com/")
     private val catalogJson = """{
       "format":"teleo-music-catalog","version":1,"tracks":[{
       "id":"kinetra-fixture-01","title":"Fixture Resonance","artist":"Teleo Test",
@@ -32,7 +35,7 @@ class TeleoMusicRemoteRepositoryTest {
     private val mapper = TeleoMusicDtoMapper()
 
     @Test fun `catalog and experience map real channels without mock injection`() {
-        val track = mapper.catalog(catalogJson).tracks.single()
+        val track = mapper.catalog(catalogJson, serverId).tracks.single()
         val parsed = mapper.experience(experienceJson, track)
         assertEquals(MusicEventType.KICK, parsed.timeline.events.first { it.timestampMs == 1_000L }.type)
         assertTrue(parsed.timeline.lyrics.isEmpty())
@@ -45,7 +48,7 @@ class TeleoMusicRemoteRepositoryTest {
 
     @Test fun `unsupported schemas and unsafe experience urls are rejected`() {
         assertThrows<TeleoMusicRemoteException.UnsupportedSchema> {
-            mapper.catalog(catalogJson.replace("\"version\":1", "\"version\":99"))
+            mapper.catalog(catalogJson.replace("\"version\":1", "\"version\":99"), serverId)
         }
         val base = URI("https://music.example.com/releases/")
         assertEquals("https://music.example.com/releases/tracks/a/experience.json", resolveRelativeExperienceUrl(base, "tracks/a/experience.json"))
@@ -62,7 +65,7 @@ class TeleoMusicRemoteRepositoryTest {
         val experience = object : TeleoExperienceRemoteDataSource {
             override suspend fun downloadExperience(path: String) = RemoteDocument(experienceJson.replace(Regex("\"experienceVersion\"\\s*:\\s*2"), "\"experienceVersion\":$version"), "https://music.example.com/$path", 99)
         }
-        val repository = DefaultTeleoMusicRepository(catalog, experience, local)
+        val repository = DefaultTeleoMusicRepository(profile, catalog, experience, local)
         val firstTrack = repository.loadCatalog().catalog.tracks.single()
         assertEquals(RemoteCacheStatus.MISS, repository.loadExperience(firstTrack).cacheStatus)
         assertEquals(RemoteCacheStatus.HIT, repository.loadExperience(firstTrack).cacheStatus)

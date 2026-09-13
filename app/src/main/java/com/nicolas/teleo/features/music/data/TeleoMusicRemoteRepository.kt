@@ -1,7 +1,6 @@
 package com.nicolas.teleo.features.music.data
 
 import android.content.Context
-import com.nicolas.teleo.BuildConfig
 import com.nicolas.teleo.features.music.domain.ExperienceQuality
 import com.nicolas.teleo.features.music.domain.MusicEvent
 import com.nicolas.teleo.features.music.domain.MusicEventType
@@ -10,6 +9,8 @@ import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.RemoteCacheStatus
 import com.nicolas.teleo.features.music.domain.RemoteMusicExperience
 import com.nicolas.teleo.features.music.domain.SourceHash
+import com.nicolas.teleo.features.music.domain.ResonanceAuthType
+import com.nicolas.teleo.features.music.domain.ResonanceServerProfile
 import com.nicolas.teleo.features.music.domain.TeleoMusicCatalog
 import com.nicolas.teleo.features.music.domain.TeleoMusicCatalogTrack
 import com.nicolas.teleo.features.music.domain.TimedLyricLine
@@ -24,11 +25,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val REMOTE_LOG = "MUSIC_REMOTE"
 private const val CATALOG_FILE = "catalog.json"
 private const val METADATA_FILE = "metadata.json"
 private const val EXPERIENCE_FILE = "experience.json"
@@ -41,6 +40,7 @@ sealed class TeleoMusicRemoteException(message: String, cause: Throwable? = null
     class InvalidExperience(cause: Throwable) : TeleoMusicRemoteException("La experiencia descargada no es válida.", cause)
     class UnsupportedSchema : TeleoMusicRemoteException("Esta experiencia requiere una versión más reciente de Teleo.")
     class UnsafeUrl : TeleoMusicRemoteException("La URL de la experiencia no es válida.")
+    class MissingCredential : TeleoMusicRemoteException("Falta la credencial del servidor de experiencias.")
     class CacheCorrupted : TeleoMusicRemoteException("La caché de esta experiencia está dañada.")
 }
 
@@ -74,14 +74,17 @@ data class ExperienceCacheMetadata(
 )
 
 class OkHttpTeleoMusicRemoteDataSource(
-    private val baseUrl: String = BuildConfig.TELEO_MUSIC_BASE_URL,
+    private val profile: ResonanceServerProfile,
+    private val credentials: ResonanceCredentialStore,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 ) : MusicCatalogRemoteDataSource, TeleoExperienceRemoteDataSource {
-    private val baseUri: URI = validatedBaseUri(baseUrl)
+    private val baseUri: URI = URI(profile.baseUrl)
 
     override suspend fun downloadCatalog(): RemoteDocument = get(resolveRelativeExperienceUrl(baseUri, "catalog.json"))
 
@@ -89,12 +92,17 @@ class OkHttpTeleoMusicRemoteDataSource(
         get(resolveRelativeExperienceUrl(baseUri, relativePath))
 
     private suspend fun get(url: String): RemoteDocument = withContext(Dispatchers.IO) {
-        android.util.Log.d(REMOTE_LOG, "Request $url")
-        val call = client.newCall(Request.Builder().url(url).get().build())
+        val request = Request.Builder().url(url).get().apply {
+            if (profile.authType == ResonanceAuthType.BEARER_TOKEN) {
+                val token = credentials.readBearerToken(profile.id) ?: throw TeleoMusicRemoteException.MissingCredential()
+                header("Authorization", "Bearer $token")
+            }
+        }.build()
+        val call = client.newCall(request)
         try {
             val response = call.execute()
             response.use {
-                if (!it.isSuccessful) throw TeleoMusicRemoteException.Http(it.code)
+                if (it.isRedirect || !it.isSuccessful) throw TeleoMusicRemoteException.Http(it.code)
                 val body = it.body?.string() ?: throw TeleoMusicRemoteException.InvalidExperience(IllegalStateException("Empty response"))
                 RemoteDocument(body, url, body.toByteArray(Charsets.UTF_8).size.toLong())
             }
@@ -111,17 +119,15 @@ fun resolveRelativeExperienceUrl(baseUri: URI, path: String): String {
     if (path.isBlank() || path.contains("\\") || path.startsWith("/") || path.contains("://")) throw TeleoMusicRemoteException.UnsafeUrl()
     val relative = URI(path)
     if (relative.isAbsolute || relative.host != null || relative.path.split('/').any { it == ".." }) throw TeleoMusicRemoteException.UnsafeUrl()
-    return baseUri.resolve(relative).toString()
+    val resolved = baseUri.resolve(relative)
+    if (resolved.scheme != "https" || resolved.host != baseUri.host || resolved.port != baseUri.port || !resolved.path.startsWith(baseUri.path)) {
+        throw TeleoMusicRemoteException.UnsafeUrl()
+    }
+    return resolved.toString()
 }
 
-private fun validatedBaseUri(raw: String): URI = try {
-    URI(raw).also { require(it.scheme == "https" && !it.host.isNullOrBlank()) }
-} catch (_: Exception) {
-    throw IllegalArgumentException("TELEO_MUSIC_BASE_URL must be an HTTPS URL with host")
-}
-
-class FileTeleoExperienceLocalDataSource(context: Context) : TeleoExperienceLocalDataSource {
-    private val root = File(context.filesDir, "music_timelines/remote")
+class FileTeleoExperienceLocalDataSource(context: Context, serverId: String) : TeleoExperienceLocalDataSource {
+    private val root = RemoteMusicCachePaths.serverDirectory(context.filesDir, serverId)
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun readCatalog(): String? = withContext(Dispatchers.IO) {
@@ -173,6 +179,18 @@ class FileTeleoExperienceLocalDataSource(context: Context) : TeleoExperienceLoca
     }
 }
 
+object RemoteMusicCachePaths {
+    fun serverDirectory(filesDir: File, serverId: String): File {
+        require(runCatching { java.util.UUID.fromString(serverId) }.isSuccess) { "Invalid server id" }
+        return File(filesDir, "music_timelines/remote/$serverId")
+    }
+
+    suspend fun clearServer(context: Context, serverId: String): Unit = withContext(Dispatchers.IO) {
+        RemoteMusicCachePaths.serverDirectory(context.filesDir, serverId).deleteRecursively()
+        Unit
+    }
+}
+
 class InMemoryTeleoExperienceLocalDataSource : TeleoExperienceLocalDataSource {
     var catalog: String? = null
     val experiences = mutableMapOf<String, CachedExperience>()
@@ -193,6 +211,7 @@ interface TeleoMusicRepository {
 data class CatalogLoad(val catalog: TeleoMusicCatalog, val offlineCache: Boolean, val warning: String? = null)
 
 class DefaultTeleoMusicRepository(
+    private val profile: ResonanceServerProfile,
     private val catalogRemote: MusicCatalogRemoteDataSource,
     private val experienceRemote: TeleoExperienceRemoteDataSource,
     private val local: TeleoExperienceLocalDataSource,
@@ -201,12 +220,12 @@ class DefaultTeleoMusicRepository(
     override suspend fun loadCatalog(): CatalogLoad {
         return try {
             val remote = catalogRemote.downloadCatalog()
-            val catalog = try { mapper.catalog(remote.body) } catch (error: Exception) { throw TeleoMusicRemoteException.InvalidCatalog(error) }
+            val catalog = try { mapper.catalog(remote.body, profile.id) } catch (error: Exception) { throw TeleoMusicRemoteException.InvalidCatalog(error) }
             local.writeCatalog(remote.body)
             CatalogLoad(catalog, offlineCache = false)
         } catch (network: TeleoMusicRemoteException) {
             val cached = local.readCatalog() ?: throw network
-            val catalog = try { mapper.catalog(cached) } catch (_: Exception) { throw TeleoMusicRemoteException.CacheCorrupted() }
+            val catalog = try { mapper.catalog(cached, profile.id) } catch (_: Exception) { throw TeleoMusicRemoteException.CacheCorrupted() }
             CatalogLoad(catalog, offlineCache = true, warning = "Sin conexión. Usando catálogo descargado.")
         }
     }
@@ -232,7 +251,7 @@ class DefaultTeleoMusicRepository(
 
     private fun parseExperience(track: TeleoMusicCatalogTrack, raw: String, url: String, bytes: Long, status: RemoteCacheStatus): RemoteMusicExperience = try {
         val parsed = mapper.experience(raw, track)
-        RemoteMusicExperience(track.copy(sourceHash = parsed.sourceHash ?: track.sourceHash), parsed.schemaVersion, parsed.timeline, url, bytes, status)
+        RemoteMusicExperience(profile.id, track.copy(sourceHash = parsed.sourceHash ?: track.sourceHash), parsed.schemaVersion, parsed.timeline, url, bytes, status)
     } catch (error: TeleoMusicRemoteException) { throw error }
     catch (error: Exception) { throw TeleoMusicRemoteException.InvalidExperience(error) }
 }
@@ -287,11 +306,11 @@ data class TeleoExperienceDto(
 @Serializable data class FeatureFrameDto(val timestampMs: Long, val beatPhase: Float = 0f, val beatStrength: Float = 0f, val lowEnergy: Float = 0f, val midEnergy: Float = 0f, val highEnergy: Float = 0f, val vocalPresence: Float = 0f, val melodicPitchNormalized: Float? = null, val spectralBrightness: Float = 0f, val overallEnergy: Float = 0f, val sectionId: String? = null)
 
 class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = true }) {
-    fun catalog(raw: String): TeleoMusicCatalog {
+    fun catalog(raw: String, serverId: String): TeleoMusicCatalog {
         val dto = json.decodeFromString(TeleoMusicCatalogDto.serializer(), raw)
         validateProtocol(dto.format, dto.version, "teleo-music-catalog")
         return TeleoMusicCatalog(dto.tracks.map {
-            TeleoMusicCatalogTrack(it.id, it.title, it.artist, it.durationMs, it.experienceVersion, ExperienceQuality.fromWire(it.quality), it.experienceUrl, it.sourceHash?.toDomain())
+            TeleoMusicCatalogTrack(serverId, it.id, it.title, it.artist, it.durationMs, it.experienceVersion, ExperienceQuality.fromWire(it.quality), it.experienceUrl, it.sourceHash?.toDomain())
         }, dto.version)
     }
 

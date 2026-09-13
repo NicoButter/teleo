@@ -1,19 +1,8 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
-
-val localProperties = Properties().apply {
-    val file = rootProject.file("local.properties")
-    if (file.isFile) file.inputStream().use { load(it) }
-}
-val configuredMusicBaseUrl = localProperties
-    .getProperty("TELEO_MUSIC_BASE_URL", "https://music.teleo.invalid/")
-    .trim()
-    .let { if (it.endsWith('/')) it else "$it/" }
 
 android {
     namespace = "com.nicolas.teleo"
@@ -27,7 +16,6 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "TELEO_MUSIC_BASE_URL", "\"$configuredMusicBaseUrl\"")
     }
 
     buildTypes {

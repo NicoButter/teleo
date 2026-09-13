@@ -41,11 +41,13 @@ import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -95,6 +97,8 @@ import com.nicolas.teleo.features.music.domain.MusicExperienceSource
 import com.nicolas.teleo.features.music.domain.TeleoMusicCatalog
 import com.nicolas.teleo.features.music.domain.TeleoMusicCatalogTrack
 import com.nicolas.teleo.features.music.domain.RemoteMusicExperience
+import com.nicolas.teleo.features.music.domain.ResonanceAuthType
+import com.nicolas.teleo.features.music.domain.ResonanceServerProfile
 import com.nicolas.teleo.features.music.domain.activeVisemeAt
 import com.nicolas.teleo.features.music.domain.activeEventsAt
 import com.nicolas.teleo.features.music.domain.TimedLyricLine
@@ -120,10 +124,13 @@ fun MusicExperienceRoute(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val serverProfiles by viewModel.serverProfiles.collectAsStateWithLifecycle()
+    val serverTestMessage by viewModel.serverTestMessage.collectAsStateWithLifecycle()
     var selectedIntensity by remember { mutableStateOf(HapticIntensity.MEDIUM) }
     var hapticsEnabled by remember { mutableStateOf(true) }
     var selectionError by remember { mutableStateOf<String?>(null) }
     var showVoiceVisualLab by rememberSaveable { mutableStateOf(false) }
+    var showServerProfiles by rememberSaveable { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -148,6 +155,18 @@ fun MusicExperienceRoute(
             VoiceVisualLabScreen(onBack = { showVoiceVisualLab = false })
             return@Surface
         }
+        if (showServerProfiles) {
+            ResonanceServerProfilesScreen(
+                profiles = serverProfiles,
+                statusMessage = serverTestMessage,
+                onBack = { showServerProfiles = false },
+                onSave = viewModel::saveServerProfile,
+                onDelete = viewModel::deleteServerProfile,
+                onEnabledChanged = viewModel::setServerEnabled,
+                onTest = viewModel::testServerConnection
+            )
+            return@Surface
+        }
         when (val current = state) {
             MusicExperienceState.LoadingCatalog -> RemoteLoadingScreen("Cargando experiencias Teleo…", leaveFeature)
             is MusicExperienceState.CatalogReady -> RemoteCatalogScreen(
@@ -158,7 +177,9 @@ fun MusicExperienceRoute(
                 onSelect = viewModel::selectRemoteExperience,
                 onOpenMock = viewModel::openMockSelection,
                 onBack = leaveFeature,
-                onOpenVoiceLab = { showVoiceVisualLab = true }
+                onOpenVoiceLab = { showVoiceVisualLab = true },
+                onOpenServers = { showServerProfiles = true },
+                serverNames = serverProfiles.associate { it.id to it.name }
             )
             is MusicExperienceState.DownloadingExperience -> RemoteLoadingScreen("Descargando ${current.track.title}…", viewModel::backToCatalog)
             is MusicExperienceState.AwaitingAudio -> AwaitingAudioScreen(
@@ -276,7 +297,9 @@ private fun RemoteCatalogScreen(
     onSelect: (TeleoMusicCatalogTrack) -> Unit,
     onOpenMock: () -> Unit,
     onBack: () -> Unit,
-    onOpenVoiceLab: () -> Unit
+    onOpenVoiceLab: () -> Unit,
+    onOpenServers: () -> Unit,
+    serverNames: Map<String, String>
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -289,6 +312,9 @@ private fun RemoteCatalogScreen(
             color = Color.White.copy(alpha = .68f), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp)
         )
         warning?.let { Text(it, color = MusicYellow, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
+        OutlinedButton(onClick = onOpenServers, modifier = Modifier.padding(top = 14.dp).testTag("music_server_profiles")) {
+            Text("SERVIDORES")
+        }
         OutlinedButton(onClick = onRefresh, modifier = Modifier.padding(top = 14.dp).testTag("music_refresh_catalog")) {
             Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("ACTUALIZAR")
         }
@@ -303,6 +329,7 @@ private fun RemoteCatalogScreen(
                 Column(Modifier.padding(18.dp)) {
                     Text(track.title, color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
                     track.artist?.let { Text(it, color = Color.White.copy(alpha = .62f)) }
+                    Text(serverNames[track.serverId] ?: "Servidor", color = Color.White.copy(alpha = .5f), fontSize = 11.sp)
                     Text("${formatTime(track.durationMs)} · ${track.quality.label} · v${track.experienceVersion}", color = MusicTeal, fontSize = 12.sp)
                     Button(onClick = { onSelect(track) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("music_remote_${track.id}"), colors = ButtonDefaults.buttonColors(containerColor = MusicCyan, contentColor = MusicDark)) {
                         Text("DESCARGAR EXPERIENCIA", fontWeight = FontWeight.Bold)
@@ -317,6 +344,103 @@ private fun RemoteCatalogScreen(
             Text("ABRIR VOICE VISUAL LAB")
         }
     }
+}
+
+@Composable
+private fun ResonanceServerProfilesScreen(
+    profiles: List<ResonanceServerProfile>,
+    statusMessage: String?,
+    onBack: () -> Unit,
+    onSave: (ResonanceServerProfile, String?) -> Unit,
+    onDelete: (ResonanceServerProfile) -> Unit,
+    onEnabledChanged: (ResonanceServerProfile, Boolean) -> Unit,
+    onTest: (ResonanceServerProfile) -> Unit
+) {
+    var editing by remember { mutableStateOf<ResonanceServerProfile?>(null) }
+    var confirmDelete by remember { mutableStateOf<ResonanceServerProfile?>(null) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        FeatureHeader("TELEO MÚSICA", "SERVIDORES RESONANCE", onBack)
+        Text("Configuración self-hosted", color = MusicCyan, fontWeight = FontWeight.Black, fontSize = 22.sp)
+        Text("Las credenciales Bearer se cifran con Android Keystore y nunca se incluyen en el perfil.", color = Color.White.copy(alpha = .65f), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        statusMessage?.let { Text(it, color = MusicYellow, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp)) }
+        Button(onClick = { editing = ResonanceServerProfile(name = "Nuevo servidor", baseUrl = "https://example.com/") }, modifier = Modifier.padding(top = 16.dp).testTag("music_add_server"), colors = ButtonDefaults.buttonColors(containerColor = MusicCyan, contentColor = MusicDark)) {
+            Text("AGREGAR SERVIDOR")
+        }
+        if (profiles.isEmpty()) {
+            Text("Todavía no hay servidores configurados.", color = Color.White.copy(alpha = .55f), modifier = Modifier.padding(top = 28.dp))
+        }
+        profiles.forEach { profile ->
+            Surface(Modifier.fillMaxWidth().padding(top = 14.dp), color = Color.White.copy(alpha = .045f), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, MusicCyan.copy(alpha = .28f))) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(profile.name, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(profile.baseUrl, color = MusicTeal, fontSize = 11.sp)
+                            Text(if (profile.authType == ResonanceAuthType.BEARER_TOKEN) "Bearer protegido" else "Sin autenticación", color = Color.White.copy(alpha = .55f), fontSize = 11.sp)
+                        }
+                        Switch(checked = profile.enabled, onCheckedChange = { onEnabledChanged(profile, it) })
+                    }
+                    Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { onTest(profile) }) { Text("PROBAR") }
+                        OutlinedButton(onClick = { editing = profile }) { Text("EDITAR") }
+                        OutlinedButton(onClick = { confirmDelete = profile }) { Text("ELIMINAR") }
+                    }
+                }
+            }
+        }
+    }
+    editing?.let { ServerProfileEditor(
+        profile = it,
+        onDismiss = { editing = null },
+        onSave = { profile, token -> onSave(profile, token); editing = null }
+    ) }
+    confirmDelete?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Eliminar servidor") },
+            text = { Text("Se eliminarán la credencial protegida y la caché de ${profile.name}.") },
+            confirmButton = { Button(onClick = { onDelete(profile); confirmDelete = null }) { Text("ELIMINAR") } },
+            dismissButton = { OutlinedButton(onClick = { confirmDelete = null }) { Text("CANCELAR") } }
+        )
+    }
+}
+
+@Composable
+private fun ServerProfileEditor(
+    profile: ResonanceServerProfile,
+    onDismiss: () -> Unit,
+    onSave: (ResonanceServerProfile, String?) -> Unit
+) {
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
+    var authType by remember(profile.id) { mutableStateOf(profile.authType) }
+    var token by remember(profile.id) { mutableStateOf("") }
+    var validationError by remember(profile.id) { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Servidor Resonance") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(name, { name = it }, label = { Text("Nombre") }, singleLine = true)
+                OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("URL HTTPS base") }, singleLine = true, modifier = Modifier.padding(top = 8.dp))
+                Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = authType == ResonanceAuthType.NONE, onClick = { authType = ResonanceAuthType.NONE }, label = { Text("Sin auth") })
+                    FilterChip(selected = authType == ResonanceAuthType.BEARER_TOKEN, onClick = { authType = ResonanceAuthType.BEARER_TOKEN }, label = { Text("Bearer") })
+                }
+                if (authType == ResonanceAuthType.BEARER_TOKEN) {
+                    OutlinedTextField(token, { token = it }, label = { Text("Bearer token") }, singleLine = true, modifier = Modifier.padding(top = 8.dp))
+                    Text("Dejá vacío para conservar el token existente al editar.", color = Color.White.copy(alpha = .55f), fontSize = 11.sp)
+                }
+                validationError?.let { Text(it, color = Color(0xFFFF6B6B), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
+            }
+        },
+        confirmButton = { Button(onClick = {
+            runCatching { profile.copy(name = name.trim(), baseUrl = baseUrl, authType = authType) }
+                .onSuccess { onSave(it, token.takeIf { value -> value.isNotBlank() }) }
+                .onFailure { validationError = it.message ?: "Revisá los datos del servidor." }
+        }) { Text("GUARDAR") } },
+        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("CANCELAR") } }
+    )
 }
 
 @Composable

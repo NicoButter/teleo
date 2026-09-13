@@ -5,12 +5,16 @@ import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nicolas.teleo.features.music.data.DefaultTeleoMusicRepository
+import com.nicolas.teleo.features.music.data.AndroidKeystoreResonanceCredentialStore
 import com.nicolas.teleo.features.music.data.FileTeleoExperienceLocalDataSource
+import com.nicolas.teleo.features.music.data.FileResonanceServerProfileStore
 import com.nicolas.teleo.features.music.data.FileMusicTimelineRepository
 import com.nicolas.teleo.features.music.data.MockMusicAnalyzer
 import com.nicolas.teleo.features.music.data.MusicTimelineRepository
 import com.nicolas.teleo.features.music.data.MusicTrackResolver
 import com.nicolas.teleo.features.music.data.OkHttpTeleoMusicRemoteDataSource
+import com.nicolas.teleo.features.music.data.RemoteMusicCachePaths
+import com.nicolas.teleo.features.music.data.ResonanceServerProfileManager
 import com.nicolas.teleo.features.music.data.TeleoMusicRepository
 import com.nicolas.teleo.features.music.domain.AudioHashStatus
 import com.nicolas.teleo.features.music.domain.AudioValidationResult
@@ -26,6 +30,7 @@ import com.nicolas.teleo.features.music.domain.MusicTrack
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.RemoteMusicExperience
 import com.nicolas.teleo.features.music.domain.RemotePlaybackDebugInfo
+import com.nicolas.teleo.features.music.domain.ResonanceServerProfile
 import com.nicolas.teleo.features.music.domain.TeleoMusicCatalogTrack
 import com.nicolas.teleo.features.music.domain.adjustedTimelinePosition
 import com.nicolas.teleo.features.music.domain.eventsBetween
@@ -45,14 +50,19 @@ import kotlinx.coroutines.delay
 class MusicExperienceViewModel(application: Application) : AndroidViewModel(application) {
     private val analyzer: MusicAnalyzer = MockMusicAnalyzer()
     private val mockRepository: MusicTimelineRepository = FileMusicTimelineRepository(application)
-    private val remoteRepository: TeleoMusicRepository = DefaultTeleoMusicRepository(
-        OkHttpTeleoMusicRemoteDataSource(), OkHttpTeleoMusicRemoteDataSource(), FileTeleoExperienceLocalDataSource(application)
-    )
+    private val credentialStore = AndroidKeystoreResonanceCredentialStore(application)
+    private val profileManager = ResonanceServerProfileManager(
+        FileResonanceServerProfileStore(application), credentialStore
+    ) { serverId -> RemoteMusicCachePaths.clearServer(application, serverId) }
     private val playbackController: MusicPlaybackController = ExoPlayerMusicPlaybackController(application)
     private val hapticEngine: HapticMusicEngine = AndroidHapticMusicEngine(application)
 
     private val mutableState = MutableStateFlow<MusicExperienceState>(MusicExperienceState.LoadingCatalog)
     val state: StateFlow<MusicExperienceState> = mutableState.asStateFlow()
+    private val mutableServerProfiles = MutableStateFlow<List<ResonanceServerProfile>>(emptyList())
+    val serverProfiles: StateFlow<List<ResonanceServerProfile>> = mutableServerProfiles.asStateFlow()
+    private val mutableServerTestMessage = MutableStateFlow<String?>(null)
+    val serverTestMessage: StateFlow<String?> = mutableServerTestMessage.asStateFlow()
 
     private var operationJob: Job? = null
     private var bufferJob: Job? = null
@@ -70,19 +80,36 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     init {
         hapticEngine.updateSettings(hapticSettings)
         viewModelScope.launch { playbackController.playbackState.collectLatest(::onPlaybackState) }
-        refreshCatalog()
+        viewModelScope.launch { reloadProfiles(); refreshCatalog() }
     }
 
     fun refreshCatalog() {
         operationJob?.cancel()
         operationJob = viewModelScope.launch {
             mutableState.value = MusicExperienceState.LoadingCatalog
-            runCatching { remoteRepository.loadCatalog() }
-                .onSuccess { mutableState.value = MusicExperienceState.CatalogReady(it.catalog, it.offlineCache, it.warning) }
-                .onFailure { mutableState.value = MusicExperienceState.CatalogReady(
+            val enabled = mutableServerProfiles.value.filter { it.enabled }
+            if (enabled.isEmpty()) {
+                mutableState.value = MusicExperienceState.CatalogReady(
                     com.nicolas.teleo.features.music.domain.TeleoMusicCatalog(emptyList()), false,
-                    "No se pudieron cargar experiencias remotas. El modo demo sigue disponible."
-                ) }
+                    "Agregá y activá un servidor para cargar experiencias. El modo demo sigue disponible."
+                )
+                return@launch
+            }
+            val loads = enabled.map { profile ->
+                runCatching { repositoryFor(profile).loadCatalog() }.onSuccess { profileManager.markSynced(profile) }
+            }
+            reloadProfiles()
+            val successful = loads.mapNotNull { it.getOrNull() }
+            val failed = loads.count { it.isFailure }
+            mutableState.value = MusicExperienceState.CatalogReady(
+                com.nicolas.teleo.features.music.domain.TeleoMusicCatalog(successful.flatMap { it.catalog.tracks }),
+                successful.isNotEmpty() && successful.all { it.offlineCache },
+                when {
+                    successful.isEmpty() -> "No se pudieron cargar los servidores habilitados. El modo demo sigue disponible."
+                    failed > 0 -> "$failed servidor(es) no respondieron; se muestran los demás."
+                    else -> successful.mapNotNull { it.warning }.firstOrNull()
+                }
+            )
         }
     }
 
@@ -90,7 +117,12 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
         operationJob?.cancel()
         operationJob = viewModelScope.launch {
             mutableState.value = MusicExperienceState.DownloadingExperience(track)
-            runCatching { remoteRepository.loadExperience(track) }
+            val profile = mutableServerProfiles.value.firstOrNull { it.id == track.serverId }
+            if (profile == null) {
+                mutableState.value = MusicExperienceState.Error("El servidor de esta experiencia ya no existe.", true)
+                return@launch
+            }
+            runCatching { repositoryFor(profile).loadExperience(track) }
                 .onSuccess { experience ->
                     currentRemoteExperience = experience
                     currentSource = MusicExperienceSource.REMOTE
@@ -99,6 +131,44 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
                 .onFailure { mutableState.value = MusicExperienceState.Error(it.message ?: "No se pudo descargar la experiencia.", true) }
         }
     }
+
+    fun saveServerProfile(draft: ResonanceServerProfile, bearerToken: String?) {
+        viewModelScope.launch {
+            runCatching { profileManager.save(draft, bearerToken) }
+                .onSuccess { reloadProfiles(); mutableServerTestMessage.value = null; refreshCatalog() }
+                .onFailure { mutableServerTestMessage.value = it.message ?: "No se pudo guardar el servidor." }
+        }
+    }
+
+    fun deleteServerProfile(profile: ResonanceServerProfile) {
+        viewModelScope.launch { profileManager.delete(profile); reloadProfiles(); refreshCatalog() }
+    }
+
+    fun setServerEnabled(profile: ResonanceServerProfile, enabled: Boolean) {
+        viewModelScope.launch { profileManager.setEnabled(profile, enabled); reloadProfiles(); refreshCatalog() }
+    }
+
+    fun testServerConnection(profile: ResonanceServerProfile) {
+        viewModelScope.launch {
+            mutableServerTestMessage.value = "Probando ${profile.name}…"
+            runCatching {
+                val remote = OkHttpTeleoMusicRemoteDataSource(profile, credentialStore).downloadCatalog()
+                com.nicolas.teleo.features.music.data.TeleoMusicDtoMapper().catalog(remote.body, profile.id)
+                profileManager.markSynced(profile)
+            }.onSuccess {
+                reloadProfiles(); mutableServerTestMessage.value = "Conexión correcta con ${profile.name}."
+            }.onFailure { mutableServerTestMessage.value = it.message ?: "No se pudo conectar con el servidor." }
+        }
+    }
+
+    private fun repositoryFor(profile: ResonanceServerProfile): TeleoMusicRepository = DefaultTeleoMusicRepository(
+        profile,
+        OkHttpTeleoMusicRemoteDataSource(profile, credentialStore),
+        OkHttpTeleoMusicRemoteDataSource(profile, credentialStore),
+        FileTeleoExperienceLocalDataSource(getApplication(), profile.id)
+    )
+
+    private suspend fun reloadProfiles() { mutableServerProfiles.value = profileManager.load() }
 
     fun selectAudioForRemote(track: MusicTrack) {
         val experience = currentRemoteExperience ?: return
@@ -125,7 +195,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
                     currentSource = MusicExperienceSource.REMOTE
                     bufferedUntilMs = experience.timeline.durationMs
                     remoteDebugInfo = RemotePlaybackDebugInfo(
-                        experience.catalogTrack.id, experience.schemaVersion, experience.catalogTrack.experienceVersion,
+                        experience.serverId, experience.catalogTrack.id, experience.schemaVersion, experience.catalogTrack.experienceVersion,
                         experience.sourceUrl, experience.cacheStatus, experience.downloadedBytes, track.durationMs,
                         experience.timeline.durationMs, hashStatus
                     )

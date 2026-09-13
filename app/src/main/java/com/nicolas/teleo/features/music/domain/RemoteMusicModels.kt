@@ -29,6 +29,7 @@ data class TeleoMusicCatalog(
 )
 
 data class TeleoMusicCatalogTrack(
+    val serverId: String,
     val id: String,
     val title: String,
     val artist: String?,
@@ -39,7 +40,7 @@ data class TeleoMusicCatalogTrack(
     val sourceHash: SourceHash? = null
 ) {
     init {
-        require(id.isNotBlank() && title.isNotBlank() && durationMs >= 0)
+        require(serverId.isNotBlank() && id.isNotBlank() && title.isNotBlank() && durationMs >= 0)
         require(experienceVersion > 0 && experiencePath.isNotBlank())
     }
 }
@@ -65,6 +66,7 @@ data class VocalVisemeEvent(
 }
 
 data class RemoteMusicExperience(
+    val serverId: String,
     val catalogTrack: TeleoMusicCatalogTrack,
     val schemaVersion: Int,
     val timeline: MusicTimeline,
@@ -76,6 +78,7 @@ data class RemoteMusicExperience(
 enum class RemoteCacheStatus { HIT, MISS, UPDATED, OFFLINE }
 
 data class RemotePlaybackDebugInfo(
+    val serverId: String,
     val trackId: String,
     val schemaVersion: Int,
     val experienceVersion: Int,

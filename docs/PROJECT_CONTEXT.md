@@ -109,11 +109,11 @@ seleccionada desde la galería.
 - Resuelve nombre, artista, duración, tamaño e ID estable sin copiar el audio.
 - Reproduce mediante Media3 ExoPlayer; `currentPosition` es la única referencia
   temporal para visuales, letra y háptica.
-- Obtiene `catalog.json` y `tracks/<track-id>/experience.json` mediante HTTPS,
-  usando una única `BuildConfig.TELEO_MUSIC_BASE_URL` configurada desde
-  `local.properties`.
-- Cachea catálogo y experiencias remotas validadas en
-  `filesDir/music_timelines/remote/`; conserva el caché previo de timelines Mock en
+- Obtiene `catalog.json` y `tracks/<track-id>/experience.json` mediante perfiles
+  Resonance self-hosted configurados en la UI. Cada perfil usa HTTPS y puede tener
+  autenticación Bearer protegida por Android Keystore.
+- Cachea catálogo y experiencias remotas validadas por servidor en
+  `filesDir/music_timelines/remote/<server-id>/`; conserva el caché previo de timelines Mock en
   `filesDir/music_timelines/<track-hash>.json`.
 - Tiene estados `Idle`, `TrackSelected`, `Analyzing`, `Countdown`, `Playing` y
   `Error`, coordinados por `MusicExperienceViewModel`.
@@ -130,7 +130,8 @@ como demo/fallback explícito. Para una experiencia `REMOTE`, Teleo no mezcla le
 secciones, visemas, eventos ni háptica del mock: consume exclusivamente el JSON
 Kinetra validado. El teléfono no ejecuta separación de fuentes, Demucs, RoFormer,
 análisis musical pesado ni IA; es un runtime player + renderer. No hay streaming de
-audio, servidor propio, autenticación ni reproducción en segundo plano.
+audio, servidor propio, cuentas/autenticación propia ni reproducción en segundo plano;
+los perfiles sí pueden autenticar GET estáticos mediante Bearer protegido.
 
 ### Voice Visual Lab
 
@@ -200,18 +201,20 @@ perteneciendo al módulo `:app`:
 | Mensajes de Teleo Cerca | Memoria y payloads Nearby; se borran al desconectar |
 | Audio seleccionado | Permiso persistente al URI; Teleo no copia el audio |
 | Timeline Mock | JSON privado de la app en `filesDir/music_timelines` |
-| Catálogo/experiencia remota | JSON privado y validado en `filesDir/music_timelines/remote` |
+| Perfiles Resonance | JSON privado de la app; no incluye tokens |
+| Bearer Resonance | Cifrado AES-GCM en preferencias privadas; clave en Android Keystore |
+| Catálogo/experiencia remota | JSON privado y validado en `filesDir/music_timelines/remote/<server-id>` |
 | Letra/traducción demo | Generada localmente; no contiene letra comercial |
 
-No existe backend propio, base de datos remota, autenticación, analítica, telemetría
-ni Firebase. Teleo sí hace dos GET públicos de JSON estático con OkHttp, siempre
-contra rutas relativas de la base HTTPS configurada. Nearby y el proveedor Android
-de voz también son servicios externos al proceso y pueden tener requisitos propios.
+No existe backend propio, base de datos remota, analítica, telemetría ni Firebase.
+Teleo sí hace GET de JSON estático con OkHttp contra rutas relativas de los
+servidores HTTPS configurados. Los perfiles pueden usar Bearer sin almacenar ni
+loguear el token en plaintext; no se siguen redirects a hosts arbitrarios. Nearby y
+el proveedor Android de voz también son servicios externos al proceso y pueden tener
+requisitos propios.
 
-El código no carga `.env`. `TELEO_MUSIC_BASE_URL` se genera en `BuildConfig` desde
-`local.properties`, con fallback seguro `https://music.teleo.invalid/`. La URL no es
-secreta; `local.properties` sigue sin versionarse para separar development y
-production. `.env` y `local.properties` nunca deben copiarse a la documentación.
+El código no carga `.env` ni consume una URL fija desde `local.properties`.
+`.env`, `local.properties`, keystores y credenciales nunca deben versionarse.
 
 ## Permisos y hardware
 
