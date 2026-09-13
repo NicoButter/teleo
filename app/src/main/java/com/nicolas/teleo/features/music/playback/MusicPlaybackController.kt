@@ -1,6 +1,7 @@
 package com.nicolas.teleo.features.music.playback
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -99,5 +100,69 @@ class ExoPlayerMusicPlaybackController(context: Context) : MusicPlaybackControll
             isReady = player.playbackState == Player.STATE_READY,
             errorMessage = error
         )
+    }
+}
+
+/**
+ * Advances a selected experience with a monotonic clock. It is deliberately
+ * separate from ExoPlayer so importing a JSON can be explored without opening,
+ * decoding, or pretending to play an audio document.
+ */
+class ClockMusicPlaybackController : MusicPlaybackController {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mutablePlaybackState = MutableStateFlow(MusicPlaybackState())
+    override val playbackState: StateFlow<MusicPlaybackState> = mutablePlaybackState.asStateFlow()
+    private var durationMs = 0L
+    private var positionMs = 0L
+    private var startedAtMs = 0L
+    private var updateJob: Job? = null
+
+    override fun load(track: MusicTrack) {
+        updateJob?.cancel()
+        durationMs = track.durationMs ?: 0L
+        positionMs = 0L
+        startedAtMs = 0L
+        publish(isPlaying = false)
+    }
+
+    override fun play() {
+        if (durationMs <= 0L || positionMs >= durationMs) positionMs = 0L
+        startedAtMs = SystemClock.elapsedRealtime() - positionMs
+        publish(isPlaying = true)
+        updateJob?.cancel()
+        updateJob = scope.launch {
+            while (isActive) {
+                positionMs = (SystemClock.elapsedRealtime() - startedAtMs).coerceIn(0L, durationMs)
+                val playing = positionMs < durationMs
+                publish(playing)
+                if (!playing) break
+                delay(50)
+            }
+        }
+    }
+
+    override fun pause() {
+        if (mutablePlaybackState.value.isPlaying) positionMs = (SystemClock.elapsedRealtime() - startedAtMs).coerceIn(0L, durationMs)
+        updateJob?.cancel()
+        publish(isPlaying = false)
+    }
+
+    override fun seekTo(positionMs: Long) {
+        this.positionMs = positionMs.coerceIn(0L, durationMs)
+        if (mutablePlaybackState.value.isPlaying) startedAtMs = SystemClock.elapsedRealtime() - this.positionMs
+        publish(mutablePlaybackState.value.isPlaying)
+    }
+
+    override fun currentPositionMs(): Long = if (mutablePlaybackState.value.isPlaying) {
+        (SystemClock.elapsedRealtime() - startedAtMs).coerceIn(0L, durationMs)
+    } else positionMs
+
+    override fun release() {
+        updateJob?.cancel()
+        scope.cancel()
+    }
+
+    private fun publish(isPlaying: Boolean) {
+        mutablePlaybackState.value = MusicPlaybackState(positionMs, durationMs, isPlaying, isReady = true)
     }
 }

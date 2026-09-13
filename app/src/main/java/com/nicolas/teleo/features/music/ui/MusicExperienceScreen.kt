@@ -201,6 +201,7 @@ fun MusicExperienceRoute(
                 experience = current.experience,
                 error = current.validationError ?: selectionError,
                 onSelectAudio = { picker.launch(arrayOf("audio/*")) },
+                onStartWithoutAudio = viewModel::prepareImportedWithoutAudio,
                 onBack = viewModel::backToCatalog
             )
             is MusicExperienceState.ValidatingImportedAudio -> RemoteLoadingScreen("Validando el audio seleccionado…", viewModel::backToCatalog)
@@ -505,6 +506,7 @@ private fun AwaitingImportedAudioScreen(
     experience: com.nicolas.teleo.features.music.domain.LocalImportedMusicExperience,
     error: String?,
     onSelectAudio: () -> Unit,
+    onStartWithoutAudio: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -512,10 +514,11 @@ private fun AwaitingImportedAudioScreen(
         Icon(Icons.Default.LibraryMusic, null, tint = MusicTeal, modifier = Modifier.size(64.dp))
         Text(experience.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
         experience.artist?.let { Text(it, color = Color.White.copy(alpha = .65f)) }
-        Text("Seleccioná el audio local correspondiente (${formatTime(experience.timeline.durationMs)}).", color = Color.White.copy(alpha = .7f), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 14.dp))
+        Text("Podés recorrer esta experiencia visual de ${formatTime(experience.timeline.durationMs)} sin audio, o sincronizarla con su audio local.", color = Color.White.copy(alpha = .7f), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 14.dp))
         error?.let { Text(it, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp)) }
-        Button(onClick = onSelectAudio, modifier = Modifier.padding(top = 22.dp).testTag("music_select_imported_audio"), colors = ButtonDefaults.buttonColors(containerColor = MusicTeal, contentColor = MusicDark)) { Text("ELEGIR AUDIO LOCAL") }
-        Text("El JSON se lee desde el documento seleccionado; Teleo no lo copia, no usa servidor y no descarga audio.", color = Color.White.copy(alpha = .45f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp))
+        Button(onClick = onStartWithoutAudio, modifier = Modifier.padding(top = 22.dp).testTag("music_start_imported_without_audio"), colors = ButtonDefaults.buttonColors(containerColor = MusicTeal, contentColor = MusicDark)) { Text("INICIAR SIN AUDIO") }
+        OutlinedButton(onClick = onSelectAudio, modifier = Modifier.padding(top = 10.dp).testTag("music_select_imported_audio")) { Text("ELEGIR AUDIO LOCAL (OPCIONAL)") }
+        Text("Sin audio, Teleo usa un reloj visual temporal; no reproduce ni analiza sonido. El JSON se lee desde el documento seleccionado, no se copia ni se envía a un servidor.", color = Color.White.copy(alpha = .45f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp))
     }
 }
 

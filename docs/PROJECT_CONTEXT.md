@@ -62,15 +62,17 @@ seleccionada desde la galería.
    servidor, valida duración/hash contra el audio local elegido y nunca descarga audio.
 4. El JSON validado sigue el recorrido `Teleo Music Protocol → TeleoExperience →
    TeleoExperienceSampler → TeleoVisualState → renderer`.
-5. `ExoPlayer.currentPosition` es la única fuente de tiempo musical. El sampler
-   interpola frames por timestamps irregulares; el frame delta sólo mueve física y
-   easing visual. Canales remotos no confiables permanecen silenciosos y no reciben
-   fallback de `MockMusicAnalyzer`.
+5. Para audio local, `ExoPlayer.currentPosition` es la fuente de tiempo musical.
+   Una importación local sin audio usa exclusivamente un reloj monótono visual, sin
+   abrir ni analizar sonido. El sampler interpola frames por timestamps irregulares;
+   el frame delta sólo mueve física y easing visual. Canales remotos no confiables
+   permanecen silenciosos y no reciben fallback de `MockMusicAnalyzer`.
 6. El modo Mock continúa siendo una selección explícita, aislada de REMOTE; al salir
    se detienen reproducción y vibración.
 7. Para desarrollo/prueba, **Importar experiencia local** abre un `experience.json`
-   mediante el selector del sistema, lo valida como protocolo v1 y luego solicita su
-   audio local; no usa catálogo, servidor ni caché REMOTE.
+   mediante el selector del sistema y lo valida como protocolo v1. Puede recorrerse
+   sin audio con reloj visual temporal, o sincronizarse con un audio local opcional;
+   no usa catálogo, servidor ni caché REMOTE.
 
 ## Capacidades implementadas
 
@@ -138,8 +140,15 @@ seleccionada desde la galería.
 - Convierte el protocolo remoto a `TeleoExperience` y lo consulta con
   `TeleoExperienceSampler` por la posición de ExoPlayer; los frames remotos pueden
   tener timestamps irregulares y los canales no confiables no se sustituyen con Mock.
+- Representa el wire format temporal de Kinetra sin transformarlo: `drums.events`,
+  `bass.notes`, `guitar.notes`, `piano.notes`, `vocals.frames` y `other.frames`
+  usan `timeMs` (con `durationMs` cuando corresponde), mientras
+  `vocals.visemes` conserva `startMs`/`endMs`; el mapper normaliza esos tiempos solo
+  al construir el dominio interno.
 - Puede importar un `experience.json` local de Kinetra mediante `OpenDocument`; el
   permiso de lectura se conserva cuando el proveedor lo permite y el JSON no se copia.
+  El importador acepta tanto `timeline.events` como el `timeline` plano duplicado de
+  exportaciones Kinetra, y notas con `timeMs`/`durationMs` o `startMs`/`endMs`.
 - Tiene estados `Idle`, `TrackSelected`, `Analyzing`, `Countdown`, `Playing` y
   `Error`, coordinados por `MusicExperienceViewModel`.
 - Ofrece escenas Sinestesia, Carriles y Minimal; controles de calidad, instrumentos,

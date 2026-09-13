@@ -41,6 +41,7 @@ import com.nicolas.teleo.features.music.domain.validateAudioDuration
 import com.nicolas.teleo.features.music.haptics.AndroidHapticMusicEngine
 import com.nicolas.teleo.features.music.haptics.HapticMusicEngine
 import com.nicolas.teleo.features.music.playback.ExoPlayerMusicPlaybackController
+import com.nicolas.teleo.features.music.playback.ClockMusicPlaybackController
 import com.nicolas.teleo.features.music.playback.MusicPlaybackController
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +61,8 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
         FileResonanceServerProfileStore(application), credentialStore
     ) { serverId -> RemoteMusicCachePaths.clearServer(application, serverId) }
     private val playbackController: MusicPlaybackController = ExoPlayerMusicPlaybackController(application)
+    private val clockPlaybackController: MusicPlaybackController = ClockMusicPlaybackController()
+    private var activePlaybackController: MusicPlaybackController = playbackController
     private val hapticEngine: HapticMusicEngine = AndroidHapticMusicEngine(application)
 
     private val mutableState = MutableStateFlow<MusicExperienceState>(MusicExperienceState.LoadingCatalog)
@@ -85,7 +88,8 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
 
     init {
         hapticEngine.updateSettings(hapticSettings)
-        viewModelScope.launch { playbackController.playbackState.collectLatest(::onPlaybackState) }
+        viewModelScope.launch { playbackController.playbackState.collectLatest { if (activePlaybackController === playbackController) onPlaybackState(it) } }
+        viewModelScope.launch { clockPlaybackController.playbackState.collectLatest { if (activePlaybackController === clockPlaybackController) onPlaybackState(it) } }
         viewModelScope.launch { reloadProfiles(); refreshCatalog() }
     }
 
@@ -151,6 +155,10 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
             }.onSuccess { experience ->
                 currentRemoteExperience = null
                 currentImportedExperience = experience
+                currentTrack = null
+                playbackController.pause()
+                clockPlaybackController.pause()
+                activePlaybackController = clockPlaybackController
                 currentSource = MusicExperienceSource.LOCAL_IMPORT
                 mutableState.value = MusicExperienceState.AwaitingImportedAudio(experience)
             }.onFailure {
@@ -219,6 +227,8 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
                     } else AudioHashStatus.NOT_AVAILABLE
                     currentTrack = track
                     currentTimeline = experience.timeline
+                    clockPlaybackController.pause()
+                    activePlaybackController = playbackController
                     currentSource = MusicExperienceSource.REMOTE
                     bufferedUntilMs = experience.timeline.durationMs
                     remoteDebugInfo = RemotePlaybackDebugInfo(
@@ -253,6 +263,8 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
                     } else AudioHashStatus.NOT_AVAILABLE
                     currentTrack = track
                     currentTimeline = experience.timeline
+                    clockPlaybackController.pause()
+                    activePlaybackController = playbackController
                     currentSource = MusicExperienceSource.LOCAL_IMPORT
                     bufferedUntilMs = experience.timeline.durationMs
                     remoteDebugInfo = null
@@ -264,7 +276,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
 
     /** Explicit local demo path. It is never used by a selected remote experience. */
     fun selectTrack(track: MusicTrack) {
-        operationJob?.cancel(); bufferJob?.cancel(); playbackController.pause(); hapticEngine.stop()
+        operationJob?.cancel(); bufferJob?.cancel(); playbackController.pause(); clockPlaybackController.pause(); activePlaybackController = playbackController; hapticEngine.stop()
         currentTrack = track; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; currentSource = MusicExperienceSource.MOCK
         remoteDebugInfo = null; bufferedUntilMs = 0
         mutableState.value = MusicExperienceState.TrackSelected(track)
@@ -276,6 +288,8 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
         currentSource = MusicExperienceSource.MOCK
         currentTrack = null
         currentTimeline = null
+        clockPlaybackController.pause()
+        activePlaybackController = playbackController
         mutableState.value = MusicExperienceState.Idle
     }
 
@@ -285,6 +299,28 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
             is MusicExperienceState.ImportedReady -> prepareImported(current.track, current.experience)
             is MusicExperienceState.TrackSelected -> prepareMock(current.track)
             else -> Unit
+        }
+    }
+
+    /** Starts a local protocol experience against a visual clock; no audio is loaded. */
+    fun prepareImportedWithoutAudio() {
+        val experience = currentImportedExperience ?: return
+        operationJob?.cancel()
+        playbackController.pause()
+        activePlaybackController = clockPlaybackController
+        currentTrack = MusicTrack(
+            id = "visual-${experience.trackId}",
+            title = experience.title,
+            artist = experience.artist,
+            uri = "teleo-experience://${experience.trackId}",
+            durationMs = experience.timeline.durationMs
+        )
+        currentTimeline = experience.timeline
+        currentSource = MusicExperienceSource.LOCAL_IMPORT
+        bufferedUntilMs = experience.timeline.durationMs
+        remoteDebugInfo = null
+        operationJob = viewModelScope.launch {
+            runCountdownAndPlay(currentTrack!!, experience.timeline, fullyBuffered = true)
         }
     }
 
@@ -327,11 +363,11 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun backToCatalog() { operationJob?.cancel(); hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; refreshCatalog() }
-    fun togglePlayPause() { val playing = mutableState.value as? MusicExperienceState.Playing ?: return; if (playing.isPlaying) { playbackController.pause(); hapticEngine.stop() } else { lastHapticPositionMs = adjustedTimelinePosition(playing.playbackPositionMs, syncOffsetMs); playbackController.play() } }
-    fun seekTo(positionMs: Long) { lastHapticPositionMs = adjustedTimelinePosition(positionMs, syncOffsetMs); hapticEngine.stop(); playbackController.seekTo(positionMs) }
+    fun backToCatalog() { operationJob?.cancel(); playbackController.pause(); clockPlaybackController.pause(); hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; activePlaybackController = playbackController; refreshCatalog() }
+    fun togglePlayPause() { val playing = mutableState.value as? MusicExperienceState.Playing ?: return; if (playing.isPlaying) { activePlaybackController.pause(); hapticEngine.stop() } else { lastHapticPositionMs = adjustedTimelinePosition(playing.playbackPositionMs, syncOffsetMs); activePlaybackController.play() } }
+    fun seekTo(positionMs: Long) { lastHapticPositionMs = adjustedTimelinePosition(positionMs, syncOffsetMs); hapticEngine.stop(); activePlaybackController.seekTo(positionMs) }
     fun restart() = seekTo(0)
-    fun playbackPositionNow(): Long = playbackController.currentPositionMs()
+    fun playbackPositionNow(): Long = activePlaybackController.currentPositionMs()
     fun setHapticsEnabled(enabled: Boolean) = updateHaptics(hapticSettings.copy(enabled = enabled))
     fun setHapticIntensity(intensity: HapticIntensity) = updateHaptics(hapticSettings.copy(intensityMultiplier = intensity.multiplier))
     fun setVisualPreset(preset: com.nicolas.teleo.features.music.domain.VisualPreset) = updateVisuals(visualSettings.copy(preset = preset))
@@ -344,20 +380,20 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     fun toggleVisualInstrument(instrument: com.nicolas.teleo.features.music.domain.VisualInstrument) { val visible = visualSettings.visibleInstruments.toMutableSet().apply { if (!add(instrument)) remove(instrument) }; updateVisuals(visualSettings.copy(visibleInstruments = visible)) }
     fun setLyricsDisplayMode(mode: com.nicolas.teleo.features.music.domain.LyricsDisplayMode) = updateVisuals(visualSettings.copy(lyricsDisplayMode = mode))
     fun setLyricsTextScale(scale: Float) = updateVisuals(visualSettings.copy(lyricsTextScale = scale.coerceIn(.8f, 1.5f)))
-    fun setSyncOffset(offsetMs: Int) { syncOffsetMs = offsetMs.coerceIn(-250, 250); lastHapticPositionMs = adjustedTimelinePosition((mutableState.value as? MusicExperienceState.Playing)?.playbackPositionMs ?: 0, syncOffsetMs); refreshPlayingState(playbackController.playbackState.value) }
+    fun setSyncOffset(offsetMs: Int) { syncOffsetMs = offsetMs.coerceIn(-250, 250); lastHapticPositionMs = adjustedTimelinePosition((mutableState.value as? MusicExperienceState.Playing)?.playbackPositionMs ?: 0, syncOffsetMs); refreshPlayingState(activePlaybackController.playbackState.value) }
 
-    fun resetForExit() { operationJob?.cancel(); bufferJob?.cancel(); playbackController.pause(); playbackController.seekTo(0); hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; bufferedUntilMs = 0; mutableState.value = MusicExperienceState.Idle }
+    fun resetForExit() { operationJob?.cancel(); bufferJob?.cancel(); playbackController.pause(); playbackController.seekTo(0); clockPlaybackController.pause(); clockPlaybackController.seekTo(0); activePlaybackController = playbackController; hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; bufferedUntilMs = 0; mutableState.value = MusicExperienceState.Idle }
 
     private suspend fun runCountdownAndPlay(track: MusicTrack, timeline: MusicTimeline, fullyBuffered: Boolean) {
         for (seconds in 3 downTo 1) { mutableState.value = MusicExperienceState.Countdown(seconds); delay(1_000) }
-        playbackController.load(track); lastHapticPositionMs = 0; mutableState.value = playingState(track, timeline, playbackController.playbackState.value); playbackController.play()
+        activePlaybackController.load(track); lastHapticPositionMs = 0; mutableState.value = playingState(track, timeline, activePlaybackController.playbackState.value); activePlaybackController.play()
         if (!fullyBuffered && currentSource == MusicExperienceSource.MOCK) startProgressiveBuffer(timeline.durationMs)
     }
-    private fun startProgressiveBuffer(durationMs: Long) { bufferJob?.cancel(); bufferJob = viewModelScope.launch { while (bufferedUntilMs < durationMs) { delay(2_000); bufferedUntilMs = minOf(durationMs, bufferedUntilMs + MusicBufferConfig.ANALYSIS_WINDOW_MS - MusicBufferConfig.OVERLAP_MS); refreshPlayingState(playbackController.playbackState.value) } } }
+    private fun startProgressiveBuffer(durationMs: Long) { bufferJob?.cancel(); bufferJob = viewModelScope.launch { while (bufferedUntilMs < durationMs) { delay(2_000); bufferedUntilMs = minOf(durationMs, bufferedUntilMs + MusicBufferConfig.ANALYSIS_WINDOW_MS - MusicBufferConfig.OVERLAP_MS); refreshPlayingState(activePlaybackController.playbackState.value) } } }
     private fun onPlaybackState(playback: MusicPlaybackState) { if (playback.errorMessage != null) { hapticEngine.stop(); mutableState.value = MusicExperienceState.Error(playback.errorMessage, true); return }; val playing = mutableState.value as? MusicExperienceState.Playing ?: return; val position = adjustedTimelinePosition(playback.positionMs, syncOffsetMs); if (playback.isPlaying) { val distance = position - lastHapticPositionMs; if (distance in 0..500) playing.timeline.hapticEvents.filter { it.timestampMs > lastHapticPositionMs && it.timestampMs <= position }.forEach(hapticEngine::playEvent); lastHapticPositionMs = position } else { hapticEngine.stop(); lastHapticPositionMs = position }; mutableState.value = playingState(playing.track, playing.timeline, playback) }
     private fun refreshPlayingState(playback: MusicPlaybackState) { val playing = mutableState.value as? MusicExperienceState.Playing ?: return; mutableState.value = playingState(playing.track, playing.timeline, playback) }
     private fun playingState(track: MusicTrack, timeline: MusicTimeline, playback: MusicPlaybackState) = MusicExperienceState.Playing(track, timeline, playback.positionMs.coerceIn(0, timeline.durationMs), bufferedUntilMs, playback.isPlaying, hapticSettings, visualSettings, syncOffsetMs, bufferedUntilMs < timeline.durationMs && bufferedUntilMs - playback.positionMs < MusicBufferConfig.MINIMUM_SAFE_BUFFER_MS, currentSource, remoteDebugInfo, when (currentSource) { MusicExperienceSource.REMOTE -> currentRemoteExperience?.teleoExperience; MusicExperienceSource.LOCAL_IMPORT -> currentImportedExperience?.teleoExperience; MusicExperienceSource.MOCK -> null })
-    private fun updateHaptics(settings: HapticSettings) { hapticSettings = settings; hapticEngine.updateSettings(settings); refreshPlayingState(playbackController.playbackState.value) }
-    private fun updateVisuals(settings: MusicVisualSettings) { visualSettings = settings; refreshPlayingState(playbackController.playbackState.value) }
-    override fun onCleared() { hapticEngine.stop(); playbackController.release(); super.onCleared() }
+    private fun updateHaptics(settings: HapticSettings) { hapticSettings = settings; hapticEngine.updateSettings(settings); refreshPlayingState(activePlaybackController.playbackState.value) }
+    private fun updateVisuals(settings: MusicVisualSettings) { visualSettings = settings; refreshPlayingState(activePlaybackController.playbackState.value) }
+    override fun onCleared() { hapticEngine.stop(); playbackController.release(); clockPlaybackController.release(); super.onCleared() }
 }

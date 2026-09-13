@@ -17,12 +17,14 @@ Teleo Música soporta tres fuentes explícitas:
   usa como fallback silencioso de una experiencia remota.
 - **LOCAL_IMPORT:** una experiencia `teleo-music` v1 seleccionada mediante
   `OpenDocument` para desarrollo/prueba. No consulta servidor, catálogo ni caché
-  REMOTE y luego pide el audio local correspondiente.
+  REMOTE. Puede recorrer sus señales visuales y hápticas con un reloj temporal sin
+  audio, o usar un audio local opcionalmente validado.
 
 Teleo no analiza el audio ni ejecuta separación de stems, Demucs, RoFormer,
-Rhubarb o IA musical. Es el runtime player + renderer. `ExoPlayer.currentPosition`
-sigue siendo la única referencia temporal para eventos, letras, visemas, visuales y
-háptica; los relojes de frame solo mueven la física visual.
+Rhubarb o IA musical. Es el runtime player + renderer. Cuando hay audio,
+`ExoPlayer.currentPosition` es la referencia temporal para eventos, letras, visemas,
+visuales y háptica. Una experiencia local sin audio usa un reloj monótono propio,
+solo para recorrer el JSON; los relojes de frame solo mueven la física visual.
 
 ### Servidores Resonance self-hosted
 
@@ -64,9 +66,11 @@ cleartext HTTP global.
 `version: 1` y un `track` que coincida en `id` y `durationMs` con el catálogo. El
 export actual de Kinetra usa `drums.events`, `bass.notes`, `guitar.notes`,
 `piano.notes`, `vocals.frames`, `vocals.visemes`, `other.frames`, `timeline.events`,
-`lyrics`, `sections` y `haptics`; todos los arrays pueden estar vacíos. Los eventos
-temporales usan `startMs`, `durationMs` o `endMs`, `intensity` y, si corresponde,
-`type`/`label`.
+`lyrics`, `sections` y `haptics`; todos los arrays pueden estar vacíos. El wire
+format de Kinetra usa `timeMs` + `durationMs` en batería, notas de bajo/guitarra/piano
+y frames de voz/ambiente; los visemas conservan `startMs` + `endMs`. Otros eventos
+del protocolo pueden usar `startMs`, `durationMs` o `endMs`, `intensity` y, si
+corresponde, `type`/`label`.
 
 `channelsQuality` es un objeto por canal, no un mapa de strings. Cada entrada expone
 `status`, `score`, `warnings` y `metrics`; este último conserva un objeto JSON libre
@@ -131,12 +135,13 @@ instrumentación con JankStats; este incremento no introduce un motor gráfico e
 
 ### Señales REMOTE
 
-El recorrido de datos remoto es: **Teleo Music Protocol → TeleoExperience →
+El recorrido de datos remoto o importado es: **Teleo Music Protocol → TeleoExperience →
 TeleoExperienceSampler → TeleoVisualState → renderer**. El mapper normaliza DTOs sin
 decidir color o estilo; el sampler busca por timestamp e interpola únicamente entre
-frames vecinos. La posición que recibe proviene de `ExoPlayer.currentPosition`.
-Los frames no presuponen una cadencia fija. Canales `unreliable` o desconocidos no
-producen señales inventadas ni reciben fallback Mock.
+frames vecinos. La posición que recibe proviene de `ExoPlayer.currentPosition` con
+audio o del reloj visual de una importación sin audio. Los frames no presuponen una
+cadencia fija. Canales `unreliable` o desconocidos no producen señales inventadas ni
+reciben fallback Mock.
 
 No se agregó `graphics-path`: `graphics-shapes` ya convierte el resultado del morph a un `android.graphics.Path`, que Compose puede dibujar directamente, y el laboratorio no inspecciona segmentos. Tampoco se incorporaron Rive, Lottie, libGDX, motores de juegos ni sistemas de partículas externos.
 
@@ -175,7 +180,11 @@ Los valores iniciales son:
 
 El analizador genera el timeline simulado y entrega progreso inicial. Tras la cuenta regresiva, una tarea representa el avance de ventanas solapadas y actualiza `bufferedUntilMs`. Si la distancia preparada baja de cinco segundos se muestra un estado de recuperación, sin cerrar ni bloquear la experiencia.
 
-La única fuente de verdad temporal es `ExoPlayer.currentPosition`. Una lectura periódica publica esa posición; no existe un temporizador que avance una posición musical independiente. Pausar, reiniciar o buscar cambia ExoPlayer y, por esa misma posición, se resincronizan carriles, letra y háptica. El ajuste manual se limita a -250…+250 ms.
+Con audio, la única fuente de verdad temporal es `ExoPlayer.currentPosition`. Sin
+audio, una importación local usa un reloj monótono explícito que avanza solo su
+experiencia visual; no abre ni decodifica un archivo de sonido. Pausar, reiniciar o
+buscar cambia la fuente temporal activa y, por esa misma posición, se resincronizan
+carriles, letra y háptica. El ajuste manual se limita a -250…+250 ms.
 
 ## Motor visual generativo
 
@@ -187,7 +196,7 @@ El motor visual no abre ni analiza archivos. Consume solamente `MusicTimeline`, 
 4. `MusicVisualScene` define entrada, actualización, renderizado y salida sin depender de Compose.
 5. `GenerativeMusicCanvas` adapta el resultado al Canvas acelerado de Compose.
 
-El ciclo de cada fotograma usa `withFrameNanos`, pero no convierte ese tiempo en una posición musical. En cada frame consulta `ExoPlayer.currentPosition`, interpola características en esa posición, obtiene eventos cruzados desde el frame anterior, actualiza el motor y dibuja. El delta de frame sólo se utiliza para física visual. Al pausar, el ciclo se suspende; al buscar o cambiar de canción, el motor se reconstruye con la posición real y eventos recientes.
+El ciclo de cada fotograma usa `withFrameNanos`, pero no convierte ese tiempo en una posición musical. En cada frame consulta la fuente temporal activa (ExoPlayer con audio o el reloj de la experiencia importada sin audio), interpola características en esa posición, obtiene eventos cruzados desde el frame anterior, actualiza el motor y dibuja. El delta de frame sólo se utiliza para física visual. Al pausar, el ciclo se suspende; al buscar o cambiar de fuente, el motor se reconstruye con la posición real y eventos recientes.
 
 ## Voice Visual Lab
 

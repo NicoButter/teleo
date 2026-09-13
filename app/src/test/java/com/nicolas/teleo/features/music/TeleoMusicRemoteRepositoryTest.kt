@@ -92,15 +92,20 @@ class TeleoMusicRemoteRepositoryTest {
           "format":"teleo-music","version":1,"experienceVersion":2,
           "track":{"id":"kinetra-fixture-01","title":"Fixture","durationMs":60000},
           "channelsQuality":{"drums":{"status":"reliable","score":0.9,"warnings":[],"metrics":{"eventCount":1}},"bass":{"status":"unreliable","score":0.2,"warnings":[],"metrics":{"noteCount":1}},"vocals":{"status":"reliable","score":1.0,"warnings":[],"metrics":{"frameCount":1}},"other":{"status":"reliable","score":1.0,"warnings":[],"metrics":{"frameCount":1}}},
-          "drums":{"events":[{"startMs":10,"durationMs":30,"type":"snare","intensity":0.8}]},
-          "bass":{"notes":[{"startMs":20,"endMs":80,"midi":40,"intensity":0.7,"confidence":0.9}]},
-          "vocals":{"frames":[{"timestampMs":15,"presence":0.6,"pitchNormalized":1.4,"pitchConfidence":0.9}],"visemes":[{"startMs":20,"endMs":40,"shape":"F"}]},
-          "other":{"frames":[{"timestampMs":15,"lowEnergy":0.4,"overallEnergy":0.5}]},
+          "drums":{"events":[{"timeMs":10,"durationMs":30,"type":"snare","intensity":0.8}]},
+          "bass":{"notes":[{"timeMs":20,"durationMs":60,"midi":40,"intensity":0.7,"confidence":0.9}]},
+          "vocals":{"frames":[{"timeMs":15,"presence":0.6,"pitchNormalized":1.4,"pitchConfidence":0.9}],"visemes":[{"startMs":20,"endMs":40,"shape":"F"}]},
+          "other":{"frames":[{"timeMs":15,"lowEnergy":0.4,"overallEnergy":0.5}]},
           "timeline":{"events":[{"startMs":25,"type":"kick"}]}
         }"""
         val parsed = mapper.experience(raw, track).experience
         assertEquals(1, parsed.drums.size)
+        assertEquals(10L, parsed.drums.single().startMs)
+        assertEquals(30L, parsed.drums.single().durationMs)
         assertEquals(40, parsed.bassNotes.single().midi)
+        assertEquals(20L, parsed.bassNotes.single().startMs)
+        assertEquals(80L, parsed.bassNotes.single().endMs)
+        assertEquals(15L, parsed.vocalFrames.single().timestampMs)
         assertEquals(1f, parsed.vocalFrames.single().pitchNormalized)
         assertEquals(VocalVisemeShape.F, parsed.visemes.single().shape)
         assertEquals(1, parsed.ambientFrames.size)
@@ -128,6 +133,28 @@ class TeleoMusicRemoteRepositoryTest {
         assertThrows<TeleoMusicRemoteException.UnsupportedSchema> {
             mapper.importedExperience(experienceJson.replace("\"version\": 1", "\"version\": 2"))
         }
+    }
+
+    @Test fun `local import accepts Kinetra flattened timeline and start end instrument notes`() {
+        val raw = """{
+          "format":"teleo-music","version":1,
+          "track":{"id":"b2485581-ea47-4d96-b750-1727aea5d7cf","title":"prueba-1","artist":"Nicolas","durationMs":236635,"bpm":91.95},
+          "channelsQuality":{"drums":{"status":"reliable"},"bass":{"status":"reliable"},"vocals":{"status":"reliable"},"other":{"status":"reliable"}},
+          "drums":{"events":[{"timeMs":159,"durationMs":100,"type":"hi_hat","intensity":0.607}]},
+          "bass":{"notes":[{"startMs":139,"endMs":4853,"pitchHz":48.78,"midi":31,"intensity":1.0,"confidence":0.8362}]},
+          "vocals":{"frames":[{"timeMs":0,"presence":0.1}]},
+          "other":{"frames":[{"timeMs":0,"overallEnergy":0.2}]},
+          "timeline":[{"timeMs":159,"channel":"drums","type":"hi_hat","intensity":0.607},{"timeMs":139,"channel":"bass","type":"note","intensity":1.0}],
+          "lyrics":[],"sections":[],"haptics":[]
+        }"""
+
+        val imported = mapper.importedExperience(raw)
+
+        assertEquals(91.95f, imported.timeline.bpm!!, .001f)
+        assertEquals(2, imported.timeline.events.size)
+        assertEquals(139L, imported.teleoExperience.bassNotes.single().startMs)
+        assertEquals(4_853L, imported.teleoExperience.bassNotes.single().endMs)
+        assertEquals(48.78f, imported.teleoExperience.bassNotes.single().pitch!!, .001f)
     }
 
     private inline fun <reified T : Throwable> assertThrows(block: () -> Unit) {
