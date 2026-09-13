@@ -1,7 +1,7 @@
 package com.nicolas.teleo.features.music.domain
 
 /** Provenance is explicit so a remote experience can never silently fall back to mock data. */
-enum class MusicExperienceSource { MOCK, REMOTE }
+enum class MusicExperienceSource { MOCK, REMOTE, LOCAL_IMPORT }
 
 enum class ExperienceQuality(val label: String) {
     AUTOMATIC("Automatic"),
@@ -69,10 +69,23 @@ data class RemoteMusicExperience(
     val serverId: String,
     val catalogTrack: TeleoMusicCatalogTrack,
     val schemaVersion: Int,
+    val teleoExperience: TeleoExperience,
     val timeline: MusicTimeline,
     val sourceUrl: String,
     val downloadedBytes: Long,
     val cacheStatus: RemoteCacheStatus
+)
+
+/** A protocol-v1 document selected by the user; it has no server, catalog or remote cache. */
+data class LocalImportedMusicExperience(
+    val trackId: String,
+    val title: String,
+    val artist: String?,
+    val schemaVersion: Int,
+    val experienceVersion: Int,
+    val teleoExperience: TeleoExperience,
+    val timeline: MusicTimeline,
+    val sourceHash: SourceHash?
 )
 
 enum class RemoteCacheStatus { HIT, MISS, UPDATED, OFFLINE }

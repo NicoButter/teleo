@@ -15,9 +15,10 @@ de la música para personas sordas o con hipoacusia.
 - **Escribir:** mensajes escritos presentados a gran tamaño.
 - **Teleo Cerca:** comunicación local entre dispositivos con Google Nearby
   Connections, selección o QR de sesión y aprobación del host.
-- **Teleo Música — Experimental:** catálogo HTTPS de experiencias Kinetra Resonance,
-  audio local y visuales/háptica sincronizados por ExoPlayer. La demo Mock continúa
-  disponible de forma explícita.
+- **Teleo Música — Experimental:** perfiles Resonance self-hosted HTTPS, audio local
+  y señales visuales/hápticas sincronizadas por `ExoPlayer.currentPosition`. Las
+  experiencias REMOTE se muestrean por timestamps; la demo Mock continúa disponible
+  de forma explícita y separada.
 - **Voice Visual Lab:** laboratorio simulado de formas, vocales y partículas; todavía
   no analiza micrófono ni audio.
 
@@ -58,6 +59,11 @@ Teleo Música configura servidores Resonance desde su pantalla **Servidores**. C
 perfil exige una URL HTTPS, puede usar Bearer y se guarda en el almacenamiento
 privado de la app; los tokens se cifran mediante Android Keystore. No se deben
 versionar `.env`, `local.properties`, keystores ni credenciales.
+
+En una experiencia REMOTE, Teleo conserva el audio en el dispositivo y procesa el
+JSON temporal como: `Teleo Music Protocol → TeleoExperience →
+TeleoExperienceSampler → TeleoVisualState → renderer`. No descarga ni reproduce
+audio remoto, ni mezcla datos del modo Mock.
 
 ## Alcance responsable
 

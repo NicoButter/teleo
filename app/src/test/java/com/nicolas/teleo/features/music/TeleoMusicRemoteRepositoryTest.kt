@@ -80,6 +80,39 @@ class TeleoMusicRemoteRepositoryTest {
         assertEquals(AudioHashStatus.NOT_AVAILABLE, (validateAudioDuration(60_000, 60_000) as AudioValidationResult.Valid).hashStatus)
     }
 
+    @Test fun `mapper preserves protocol signal channels and optional arrays`() {
+        val track = mapper.catalog(catalogJson, serverId).tracks.single()
+        val raw = """{
+          "format":"teleo-music","version":1,"experienceVersion":2,
+          "track":{"id":"kinetra-fixture-01","title":"Fixture","durationMs":60000},
+          "channelsQuality":{"drums":"reliable","bass":"unreliable","vocals":"reliable","other":"reliable"},
+          "drums":{"events":[{"startMs":10,"durationMs":30,"type":"snare","intensity":0.8}]},
+          "bass":{"notes":[{"startMs":20,"endMs":80,"midi":40,"intensity":0.7,"confidence":0.9}]},
+          "vocals":{"frames":[{"timestampMs":15,"presence":0.6,"pitchNormalized":1.4,"pitchConfidence":0.9}],"visemes":[{"startMs":20,"endMs":40,"shape":"F"}]},
+          "other":{"frames":[{"timestampMs":15,"lowEnergy":0.4,"overallEnergy":0.5}]},
+          "timeline":{"events":[{"startMs":25,"type":"kick"}]}
+        }"""
+        val parsed = mapper.experience(raw, track).experience
+        assertEquals(1, parsed.drums.size)
+        assertEquals(40, parsed.bassNotes.single().midi)
+        assertEquals(1f, parsed.vocalFrames.single().pitchNormalized)
+        assertEquals(VocalVisemeShape.F, parsed.visemes.single().shape)
+        assertEquals(1, parsed.ambientFrames.size)
+        assertTrue(parsed.isReliable("drums"))
+        assertTrue(!parsed.isReliable("bass"))
+    }
+
+    @Test fun `local import reuses protocol validation without a catalog or remote source`() {
+        val imported = mapper.importedExperience(experienceJson)
+        assertEquals("kinetra-fixture-01", imported.trackId)
+        assertEquals(60_000L, imported.timeline.durationMs)
+        assertEquals(MusicEventType.KICK, imported.timeline.events.first { it.timestampMs == 1_000L }.type)
+        assertEquals("abcd", imported.sourceHash?.value)
+        assertThrows<TeleoMusicRemoteException.UnsupportedSchema> {
+            mapper.importedExperience(experienceJson.replace("\"version\": 1", "\"version\": 2"))
+        }
+    }
+
     private inline fun <reified T : Throwable> assertThrows(block: () -> Unit) {
         try {
             block()

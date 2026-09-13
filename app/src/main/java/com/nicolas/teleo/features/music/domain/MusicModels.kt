@@ -150,6 +150,9 @@ sealed interface MusicExperienceState {
     data class AwaitingAudio(val experience: RemoteMusicExperience, val validationError: String? = null) : MusicExperienceState
     data class ValidatingAudio(val experience: RemoteMusicExperience) : MusicExperienceState
     data class RemoteReady(val track: MusicTrack, val experience: RemoteMusicExperience) : MusicExperienceState
+    data class AwaitingImportedAudio(val experience: LocalImportedMusicExperience, val validationError: String? = null) : MusicExperienceState
+    data class ValidatingImportedAudio(val experience: LocalImportedMusicExperience) : MusicExperienceState
+    data class ImportedReady(val track: MusicTrack, val experience: LocalImportedMusicExperience) : MusicExperienceState
     data class TrackSelected(val track: MusicTrack) : MusicExperienceState
     data class Analyzing(val track: MusicTrack, val progress: MusicAnalysisProgress) : MusicExperienceState
     data class Countdown(val secondsRemaining: Int) : MusicExperienceState
@@ -164,7 +167,8 @@ sealed interface MusicExperienceState {
         val syncOffsetMs: Int,
         val isRecoveringBuffer: Boolean,
         val source: MusicExperienceSource = MusicExperienceSource.MOCK,
-        val remoteDebugInfo: RemotePlaybackDebugInfo? = null
+        val remoteDebugInfo: RemotePlaybackDebugInfo? = null,
+        val teleoExperience: TeleoExperience? = null
     ) : MusicExperienceState
     data class Error(val message: String, val recoverable: Boolean) : MusicExperienceState
 }

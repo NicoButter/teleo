@@ -1,6 +1,7 @@
 package com.nicolas.teleo.features.music
 
 import android.app.Application
+import android.net.Uri
 import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,6 +17,7 @@ import com.nicolas.teleo.features.music.data.OkHttpTeleoMusicRemoteDataSource
 import com.nicolas.teleo.features.music.data.RemoteMusicCachePaths
 import com.nicolas.teleo.features.music.data.ResonanceServerProfileManager
 import com.nicolas.teleo.features.music.data.TeleoMusicRepository
+import com.nicolas.teleo.features.music.data.TeleoMusicDtoMapper
 import com.nicolas.teleo.features.music.domain.AudioHashStatus
 import com.nicolas.teleo.features.music.domain.AudioValidationResult
 import com.nicolas.teleo.features.music.domain.HapticIntensity
@@ -29,6 +31,7 @@ import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicTrack
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.RemoteMusicExperience
+import com.nicolas.teleo.features.music.domain.LocalImportedMusicExperience
 import com.nicolas.teleo.features.music.domain.RemotePlaybackDebugInfo
 import com.nicolas.teleo.features.music.domain.ResonanceServerProfile
 import com.nicolas.teleo.features.music.domain.TeleoMusicCatalogTrack
@@ -46,6 +49,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MusicExperienceViewModel(application: Application) : AndroidViewModel(application) {
     private val analyzer: MusicAnalyzer = MockMusicAnalyzer()
@@ -69,6 +74,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     private var currentTrack: MusicTrack? = null
     private var currentTimeline: MusicTimeline? = null
     private var currentRemoteExperience: RemoteMusicExperience? = null
+    private var currentImportedExperience: LocalImportedMusicExperience? = null
     private var currentSource = MusicExperienceSource.MOCK
     private var hapticSettings = HapticSettings()
     private var visualSettings = MusicVisualSettings()
@@ -129,6 +135,27 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
                     mutableState.value = MusicExperienceState.AwaitingAudio(experience)
                 }
                 .onFailure { mutableState.value = MusicExperienceState.Error(it.message ?: "No se pudo descargar la experiencia.", true) }
+        }
+    }
+
+    fun importLocalExperience(uri: Uri) {
+        operationJob?.cancel()
+        operationJob = viewModelScope.launch {
+            mutableState.value = MusicExperienceState.LoadingCatalog
+            runCatching {
+                val raw = withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: throw IllegalArgumentException("No se pudo leer la experiencia importada.")
+                }
+                TeleoMusicDtoMapper().importedExperience(raw)
+            }.onSuccess { experience ->
+                currentRemoteExperience = null
+                currentImportedExperience = experience
+                currentSource = MusicExperienceSource.LOCAL_IMPORT
+                mutableState.value = MusicExperienceState.AwaitingImportedAudio(experience)
+            }.onFailure {
+                mutableState.value = MusicExperienceState.Error(it.message ?: "La experiencia importada no es válida.", true)
+            }
         }
     }
 
@@ -205,16 +232,47 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
+    fun selectAudioForImportedExperience(track: MusicTrack) {
+        val experience = currentImportedExperience ?: return
+        operationJob?.cancel()
+        operationJob = viewModelScope.launch {
+            mutableState.value = MusicExperienceState.ValidatingImportedAudio(experience)
+            when (val duration = validateAudioDuration(experience.timeline.durationMs, track.durationMs)) {
+                is AudioValidationResult.Mismatch -> mutableState.value = MusicExperienceState.AwaitingImportedAudio(experience, duration.message)
+                is AudioValidationResult.Valid -> {
+                    val expectedHash = experience.sourceHash
+                    val hashStatus = if (expectedHash?.isSha256 == true) {
+                        val calculated = runCatching { MusicTrackResolver.sha256(getApplication(), track.uri.toUri()) }.getOrElse {
+                            mutableState.value = MusicExperienceState.AwaitingImportedAudio(experience, "No se pudo verificar el audio seleccionado.")
+                            return@launch
+                        }
+                        if (calculated.equals(expectedHash.value, ignoreCase = true)) AudioHashStatus.MATCH else {
+                            mutableState.value = MusicExperienceState.AwaitingImportedAudio(experience, "El audio seleccionado no corresponde a esta experiencia.")
+                            return@launch
+                        }
+                    } else AudioHashStatus.NOT_AVAILABLE
+                    currentTrack = track
+                    currentTimeline = experience.timeline
+                    currentSource = MusicExperienceSource.LOCAL_IMPORT
+                    bufferedUntilMs = experience.timeline.durationMs
+                    remoteDebugInfo = null
+                    mutableState.value = MusicExperienceState.ImportedReady(track, experience)
+                }
+            }
+        }
+    }
+
     /** Explicit local demo path. It is never used by a selected remote experience. */
     fun selectTrack(track: MusicTrack) {
         operationJob?.cancel(); bufferJob?.cancel(); playbackController.pause(); hapticEngine.stop()
-        currentTrack = track; currentTimeline = null; currentRemoteExperience = null; currentSource = MusicExperienceSource.MOCK
+        currentTrack = track; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; currentSource = MusicExperienceSource.MOCK
         remoteDebugInfo = null; bufferedUntilMs = 0
         mutableState.value = MusicExperienceState.TrackSelected(track)
     }
 
     fun openMockSelection() {
         currentRemoteExperience = null
+        currentImportedExperience = null
         currentSource = MusicExperienceSource.MOCK
         currentTrack = null
         currentTimeline = null
@@ -224,12 +282,18 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     fun prepare() {
         when (val current = mutableState.value) {
             is MusicExperienceState.RemoteReady -> prepareRemote(current.track, current.experience)
+            is MusicExperienceState.ImportedReady -> prepareImported(current.track, current.experience)
             is MusicExperienceState.TrackSelected -> prepareMock(current.track)
             else -> Unit
         }
     }
 
     private fun prepareRemote(track: MusicTrack, experience: RemoteMusicExperience) {
+        operationJob?.cancel()
+        operationJob = viewModelScope.launch { runCountdownAndPlay(track, experience.timeline, fullyBuffered = true) }
+    }
+
+    private fun prepareImported(track: MusicTrack, experience: LocalImportedMusicExperience) {
         operationJob?.cancel()
         operationJob = viewModelScope.launch { runCountdownAndPlay(track, experience.timeline, fullyBuffered = true) }
     }
@@ -256,12 +320,14 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
         mutableState.value = when {
             currentRemoteExperience != null && currentTrack == null -> MusicExperienceState.AwaitingAudio(currentRemoteExperience!!)
             currentRemoteExperience != null && currentTrack != null -> MusicExperienceState.RemoteReady(currentTrack!!, currentRemoteExperience!!)
+            currentImportedExperience != null && currentTrack == null -> MusicExperienceState.AwaitingImportedAudio(currentImportedExperience!!)
+            currentImportedExperience != null && currentTrack != null -> MusicExperienceState.ImportedReady(currentTrack!!, currentImportedExperience!!)
             currentTrack != null -> MusicExperienceState.TrackSelected(currentTrack!!)
             else -> MusicExperienceState.Idle
         }
     }
 
-    fun backToCatalog() { operationJob?.cancel(); hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; refreshCatalog() }
+    fun backToCatalog() { operationJob?.cancel(); hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; refreshCatalog() }
     fun togglePlayPause() { val playing = mutableState.value as? MusicExperienceState.Playing ?: return; if (playing.isPlaying) { playbackController.pause(); hapticEngine.stop() } else { lastHapticPositionMs = adjustedTimelinePosition(playing.playbackPositionMs, syncOffsetMs); playbackController.play() } }
     fun seekTo(positionMs: Long) { lastHapticPositionMs = adjustedTimelinePosition(positionMs, syncOffsetMs); hapticEngine.stop(); playbackController.seekTo(positionMs) }
     fun restart() = seekTo(0)
@@ -280,7 +346,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     fun setLyricsTextScale(scale: Float) = updateVisuals(visualSettings.copy(lyricsTextScale = scale.coerceIn(.8f, 1.5f)))
     fun setSyncOffset(offsetMs: Int) { syncOffsetMs = offsetMs.coerceIn(-250, 250); lastHapticPositionMs = adjustedTimelinePosition((mutableState.value as? MusicExperienceState.Playing)?.playbackPositionMs ?: 0, syncOffsetMs); refreshPlayingState(playbackController.playbackState.value) }
 
-    fun resetForExit() { operationJob?.cancel(); bufferJob?.cancel(); playbackController.pause(); playbackController.seekTo(0); hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; bufferedUntilMs = 0; mutableState.value = MusicExperienceState.Idle }
+    fun resetForExit() { operationJob?.cancel(); bufferJob?.cancel(); playbackController.pause(); playbackController.seekTo(0); hapticEngine.stop(); currentTrack = null; currentTimeline = null; currentRemoteExperience = null; currentImportedExperience = null; bufferedUntilMs = 0; mutableState.value = MusicExperienceState.Idle }
 
     private suspend fun runCountdownAndPlay(track: MusicTrack, timeline: MusicTimeline, fullyBuffered: Boolean) {
         for (seconds in 3 downTo 1) { mutableState.value = MusicExperienceState.Countdown(seconds); delay(1_000) }
@@ -290,7 +356,7 @@ class MusicExperienceViewModel(application: Application) : AndroidViewModel(appl
     private fun startProgressiveBuffer(durationMs: Long) { bufferJob?.cancel(); bufferJob = viewModelScope.launch { while (bufferedUntilMs < durationMs) { delay(2_000); bufferedUntilMs = minOf(durationMs, bufferedUntilMs + MusicBufferConfig.ANALYSIS_WINDOW_MS - MusicBufferConfig.OVERLAP_MS); refreshPlayingState(playbackController.playbackState.value) } } }
     private fun onPlaybackState(playback: MusicPlaybackState) { if (playback.errorMessage != null) { hapticEngine.stop(); mutableState.value = MusicExperienceState.Error(playback.errorMessage, true); return }; val playing = mutableState.value as? MusicExperienceState.Playing ?: return; val position = adjustedTimelinePosition(playback.positionMs, syncOffsetMs); if (playback.isPlaying) { val distance = position - lastHapticPositionMs; if (distance in 0..500) playing.timeline.hapticEvents.filter { it.timestampMs > lastHapticPositionMs && it.timestampMs <= position }.forEach(hapticEngine::playEvent); lastHapticPositionMs = position } else { hapticEngine.stop(); lastHapticPositionMs = position }; mutableState.value = playingState(playing.track, playing.timeline, playback) }
     private fun refreshPlayingState(playback: MusicPlaybackState) { val playing = mutableState.value as? MusicExperienceState.Playing ?: return; mutableState.value = playingState(playing.track, playing.timeline, playback) }
-    private fun playingState(track: MusicTrack, timeline: MusicTimeline, playback: MusicPlaybackState) = MusicExperienceState.Playing(track, timeline, playback.positionMs.coerceIn(0, timeline.durationMs), bufferedUntilMs, playback.isPlaying, hapticSettings, visualSettings, syncOffsetMs, bufferedUntilMs < timeline.durationMs && bufferedUntilMs - playback.positionMs < MusicBufferConfig.MINIMUM_SAFE_BUFFER_MS, currentSource, remoteDebugInfo)
+    private fun playingState(track: MusicTrack, timeline: MusicTimeline, playback: MusicPlaybackState) = MusicExperienceState.Playing(track, timeline, playback.positionMs.coerceIn(0, timeline.durationMs), bufferedUntilMs, playback.isPlaying, hapticSettings, visualSettings, syncOffsetMs, bufferedUntilMs < timeline.durationMs && bufferedUntilMs - playback.positionMs < MusicBufferConfig.MINIMUM_SAFE_BUFFER_MS, currentSource, remoteDebugInfo, when (currentSource) { MusicExperienceSource.REMOTE -> currentRemoteExperience?.teleoExperience; MusicExperienceSource.LOCAL_IMPORT -> currentImportedExperience?.teleoExperience; MusicExperienceSource.MOCK -> null })
     private fun updateHaptics(settings: HapticSettings) { hapticSettings = settings; hapticEngine.updateSettings(settings); refreshPlayingState(playbackController.playbackState.value) }
     private fun updateVisuals(settings: MusicVisualSettings) { visualSettings = settings; refreshPlayingState(playbackController.playbackState.value) }
     override fun onCleared() { hapticEngine.stop(); playbackController.release(); super.onCleared() }

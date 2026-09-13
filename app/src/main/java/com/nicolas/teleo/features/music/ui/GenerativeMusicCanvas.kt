@@ -21,12 +21,14 @@ import com.nicolas.teleo.features.music.domain.MusicFeatureFrame
 import com.nicolas.teleo.features.music.domain.MusicEventType
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
+import com.nicolas.teleo.features.music.domain.TeleoExperience
 import com.nicolas.teleo.features.music.domain.VisualPreset
 import com.nicolas.teleo.features.music.domain.VisualInstrument
 import com.nicolas.teleo.features.music.domain.activeEventsAt
 import com.nicolas.teleo.features.music.domain.eventsBetween
 import com.nicolas.teleo.features.music.visual.DeterministicMusicVisualEngine
 import com.nicolas.teleo.features.music.visual.LinearMusicFeatureInterpolator
+import com.nicolas.teleo.features.music.visual.TeleoExperienceSampler
 import com.nicolas.teleo.features.music.visual.MusicParticle
 import com.nicolas.teleo.features.music.visual.ParticleSemanticRole
 import com.nicolas.teleo.features.music.visual.ParticleShape
@@ -39,12 +41,14 @@ import kotlin.math.sin
 @Composable
 fun GenerativeMusicCanvas(
     timeline: MusicTimeline,
+    teleoExperience: TeleoExperience? = null,
     isPlaying: Boolean,
     playbackPositionProvider: () -> Long,
     settings: MusicVisualSettings,
     modifier: Modifier = Modifier
 ) {
     val interpolator = remember { LinearMusicFeatureInterpolator() }
+    val sampler = remember(teleoExperience) { teleoExperience?.let(::TeleoExperienceSampler) }
     val engine = remember(timeline.trackId, timeline.analysisVersion) {
         DeterministicMusicVisualEngine(timeline.trackId, timeline.analysisVersion, settings)
     }
@@ -54,7 +58,7 @@ fun GenerativeMusicCanvas(
     val organicPath = remember { Path() }
     var renderTick by remember { mutableIntStateOf(0) }
     var positionMs by remember { mutableLongStateOf(playbackPositionProvider()) }
-    var features by remember { mutableStateOf(interpolator.interpolate(timeline.featureFrames, positionMs)) }
+    var features by remember(timeline, teleoExperience) { mutableStateOf(sampler?.sample(positionMs)?.asFeatureFrame() ?: interpolator.interpolate(timeline.featureFrames, positionMs)) }
     var lastKickMs by remember { mutableLongStateOf(-10_000L) }
     var lastSnareMs by remember { mutableLongStateOf(-10_000L) }
     var lastHiHatMs by remember { mutableLongStateOf(-10_000L) }
@@ -72,7 +76,8 @@ fun GenerativeMusicCanvas(
                 val deltaSeconds = if (previousFrameNanos == 0L) 0f else {
                     ((frameNanos - previousFrameNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
                 }
-                val currentFeatures = interpolator.interpolate(timeline.featureFrames, currentPosition)
+                val sampled = sampler?.sample(currentPosition, previousPosition)
+                val currentFeatures = sampled?.asFeatureFrame() ?: interpolator.interpolate(timeline.featureFrames, currentPosition)
                 val distance = currentPosition - previousPosition
                 val visualEvents = if (distance < 0 || distance > 750) {
                     val recent = timeline.events.filter {
@@ -81,7 +86,7 @@ fun GenerativeMusicCanvas(
                     engine.rebuild(currentPosition, currentFeatures, recent)
                     recent
                 } else {
-                    val frameEvents = (timeline.eventsBetween(previousPosition, currentPosition) +
+                    val frameEvents = ((sampled?.crossedEvents ?: timeline.eventsBetween(previousPosition, currentPosition)) +
                         timeline.activeEventsAt(currentPosition)).distinctBy { "${it.timestampMs}:${it.type}" }
                     engine.update(currentPosition, deltaSeconds, currentFeatures, frameEvents)
                     frameEvents

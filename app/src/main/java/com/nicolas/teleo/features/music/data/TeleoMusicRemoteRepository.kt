@@ -15,6 +15,13 @@ import com.nicolas.teleo.features.music.domain.TeleoMusicCatalog
 import com.nicolas.teleo.features.music.domain.TeleoMusicCatalogTrack
 import com.nicolas.teleo.features.music.domain.TimedLyricLine
 import com.nicolas.teleo.features.music.domain.TimedLyricWord
+import com.nicolas.teleo.features.music.domain.TeleoAmbientFrame
+import com.nicolas.teleo.features.music.domain.TeleoBassNote
+import com.nicolas.teleo.features.music.domain.TeleoChannelQuality
+import com.nicolas.teleo.features.music.domain.TeleoDrumImpulse
+import com.nicolas.teleo.features.music.domain.TeleoExperience
+import com.nicolas.teleo.features.music.domain.TeleoVocalFrame
+import com.nicolas.teleo.features.music.domain.LocalImportedMusicExperience
 import com.nicolas.teleo.features.music.domain.VocalVisemeEvent
 import com.nicolas.teleo.features.music.domain.VocalVisemeShape
 import java.io.File
@@ -251,7 +258,7 @@ class DefaultTeleoMusicRepository(
 
     private fun parseExperience(track: TeleoMusicCatalogTrack, raw: String, url: String, bytes: Long, status: RemoteCacheStatus): RemoteMusicExperience = try {
         val parsed = mapper.experience(raw, track)
-        RemoteMusicExperience(profile.id, track.copy(sourceHash = parsed.sourceHash ?: track.sourceHash), parsed.schemaVersion, parsed.timeline, url, bytes, status)
+        RemoteMusicExperience(profile.id, track.copy(sourceHash = parsed.sourceHash ?: track.sourceHash), parsed.schemaVersion, parsed.experience, parsed.timeline, url, bytes, status)
     } catch (error: TeleoMusicRemoteException) { throw error }
     catch (error: Exception) { throw TeleoMusicRemoteException.InvalidExperience(error) }
 }
@@ -288,7 +295,9 @@ data class TeleoExperienceDto(
     val guitar: TimedChannelDto = TimedChannelDto(),
     val piano: TimedChannelDto = TimedChannelDto(),
     val vocals: VocalsChannelDto = VocalsChannelDto(),
-    val other: TimedChannelDto = TimedChannelDto(),
+    val other: OtherChannelDto = OtherChannelDto(),
+    val timeline: TimelineDto = TimelineDto(),
+    val channelsQuality: Map<String, String> = emptyMap(),
     val lyrics: List<LyricDto> = emptyList(),
     val sections: List<SectionDto> = emptyList(),
     val haptics: List<TimedEventDto> = emptyList(),
@@ -296,9 +305,14 @@ data class TeleoExperienceDto(
 )
 
 @Serializable data class ExperienceTrackDto(val id: String, val title: String, val artist: String? = null, val durationMs: Long, val sourceHash: SourceHashDto? = null)
-@Serializable data class TimedChannelDto(val events: List<TimedEventDto> = emptyList())
-@Serializable data class VocalsChannelDto(val events: List<TimedEventDto> = emptyList(), val visemes: List<VisemeDto> = emptyList())
+@Serializable data class TimedChannelDto(val events: List<TimedEventDto> = emptyList(), val notes: List<BassNoteDto> = emptyList())
+@Serializable data class VocalsChannelDto(val events: List<TimedEventDto> = emptyList(), val frames: List<VocalFrameDto> = emptyList(), val visemes: List<VisemeDto> = emptyList())
+@Serializable data class OtherChannelDto(val events: List<TimedEventDto> = emptyList(), val frames: List<AmbientFrameDto> = emptyList())
+@Serializable data class TimelineDto(val events: List<TimedEventDto> = emptyList())
 @Serializable data class TimedEventDto(val startMs: Long, val durationMs: Long = 0, val endMs: Long? = null, val type: String? = null, val intensity: Float = 1f, val label: String? = null)
+@Serializable data class BassNoteDto(val startMs: Long, val endMs: Long? = null, val durationMs: Long = 0, val midi: Int? = null, val pitchMidi: Float? = null, val pitch: Float? = null, val intensity: Float = 1f, val confidence: Float = 1f)
+@Serializable data class VocalFrameDto(val timestampMs: Long, val presence: Float = 0f, val intensity: Float = 0f, val pitchHz: Float? = null, val pitchNormalized: Float? = null, val pitchConfidence: Float = 0f, val spectralBrightness: Float = 0f)
+@Serializable data class AmbientFrameDto(val timestampMs: Long, val lowEnergy: Float = 0f, val midEnergy: Float = 0f, val highEnergy: Float = 0f, val overallEnergy: Float = 0f)
 @Serializable data class VisemeDto(val startMs: Long, val endMs: Long, val shape: String, val intensity: Float = 1f)
 @Serializable data class LyricDto(val id: String? = null, val startMs: Long, val endMs: Long, val text: String, val language: String? = null, val translations: Map<String, String> = emptyMap(), val words: List<LyricWordDto> = emptyList())
 @Serializable data class LyricWordDto(val text: String, val startMs: Long, val endMs: Long)
@@ -327,6 +341,7 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
             addAll(dto.piano.events.map { it.toEvent(MusicEventType.PIANO) })
             addAll(dto.vocals.events.map { it.toEvent(vocalType(it.type)) })
             addAll(dto.other.events.map { it.toEvent(MusicEventType.OTHER) })
+            addAll(dto.timeline.events.map { it.toEvent(MusicEventType.OTHER) })
             addAll(dto.sections.map { MusicEvent(it.startMs, 0, MusicEventType.SECTION_START, 1f, it.name) })
         }.sortedBy(MusicEvent::timestampMs)
         val haptics = dto.haptics.map { it.toEvent(hapticType(it.type)) }.sortedBy(MusicEvent::timestampMs)
@@ -336,7 +351,47 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
         }.sortedBy(TimedLyricLine::startMs)
         val frames = dto.featureFrames.map { it.toDomain() }.sortedBy(MusicFeatureFrame::timestampMs)
         val visemes = dto.vocals.visemes.map { VocalVisemeEvent(it.startMs, it.endMs, VocalVisemeShape.fromWire(it.shape), it.intensity.coerceIn(0f, 1f)) }.sortedBy(VocalVisemeEvent::startMs)
-        return ParsedExperience(dto.version, MusicTimeline(catalogTrack.id, dto.track.durationMs, null, catalogTrack.experienceVersion, events, lyrics, frames, visemes, haptics), dto.track.sourceHash?.toDomain())
+        val vocalFrames = dto.vocals.frames.map { TeleoVocalFrame(it.timestampMs, it.presence.coerceIn(0f, 1f), it.intensity.coerceIn(0f, 1f), it.pitchHz, it.pitchNormalized?.coerceIn(0f, 1f), it.pitchConfidence.coerceIn(0f, 1f), it.spectralBrightness.coerceIn(0f, 1f)) }
+            .ifEmpty { frames.map { TeleoVocalFrame(it.timestampMs, it.vocalPresence, it.vocalPresence, null, it.melodicPitchNormalized, if (it.melodicPitchNormalized == null) 0f else 1f, it.spectralBrightness) } }
+        val ambientFrames = dto.other.frames.map { TeleoAmbientFrame(it.timestampMs, it.lowEnergy.coerceIn(0f, 1f), it.midEnergy.coerceIn(0f, 1f), it.highEnergy.coerceIn(0f, 1f), it.overallEnergy.coerceIn(0f, 1f)) }
+            .ifEmpty { frames.map { TeleoAmbientFrame(it.timestampMs, it.lowEnergy, it.midEnergy, it.highEnergy, it.overallEnergy) } }
+        val experience = TeleoExperience(
+            drums = dto.drums.events.map { TeleoDrumImpulse(it.startMs, it.endMs?.minus(it.startMs)?.coerceAtLeast(0) ?: it.durationMs, drumType(it.type), it.intensity.coerceIn(0f, 1f)) }.sortedBy(TeleoDrumImpulse::startMs),
+            bassNotes = dto.bass.notes.map { TeleoBassNote(it.startMs, it.endMs ?: it.startMs + it.durationMs, it.midi, it.pitchMidi ?: it.pitch, it.intensity.coerceIn(0f, 1f), it.confidence.coerceIn(0f, 1f)) }.sortedBy(TeleoBassNote::startMs),
+            vocalFrames = vocalFrames.sortedBy(TeleoVocalFrame::timestampMs),
+            visemes = visemes,
+            ambientFrames = ambientFrames.sortedBy(TeleoAmbientFrame::timestampMs),
+            timelineEvents = events,
+            channelQuality = dto.channelsQuality.mapValues { (_, value) -> when (value.lowercase()) { "reliable" -> TeleoChannelQuality.RELIABLE; "unreliable" -> TeleoChannelQuality.UNRELIABLE; else -> TeleoChannelQuality.UNKNOWN } }
+        )
+        return ParsedExperience(dto.version, experience, MusicTimeline(catalogTrack.id, dto.track.durationMs, null, catalogTrack.experienceVersion, events, lyrics, frames, visemes, haptics), dto.track.sourceHash?.toDomain())
+    }
+
+    fun importedExperience(raw: String): LocalImportedMusicExperience {
+        val dto = json.decodeFromString(TeleoExperienceDto.serializer(), raw)
+        validateProtocol(dto.format, dto.version, "teleo-music")
+        val version = dto.experienceVersion ?: 1
+        val localTrack = TeleoMusicCatalogTrack(
+            serverId = "local-import",
+            id = dto.track.id,
+            title = dto.track.title,
+            artist = dto.track.artist,
+            durationMs = dto.track.durationMs,
+            experienceVersion = version,
+            quality = ExperienceQuality.AUTOMATIC,
+            experiencePath = "local-import"
+        )
+        val parsed = experience(raw, localTrack)
+        return LocalImportedMusicExperience(
+            trackId = dto.track.id,
+            title = dto.track.title,
+            artist = dto.track.artist,
+            schemaVersion = parsed.schemaVersion,
+            experienceVersion = version,
+            teleoExperience = parsed.experience,
+            timeline = parsed.timeline,
+            sourceHash = parsed.sourceHash
+        )
     }
 
     private fun validateProtocol(format: String, version: Int, expected: String) {
@@ -363,4 +418,4 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
     private fun FeatureFrameDto.toDomain() = MusicFeatureFrame(timestampMs, beatPhase.coerceIn(0f, 1f), beatStrength.coerceIn(0f, 1f), lowEnergy.coerceIn(0f, 1f), midEnergy.coerceIn(0f, 1f), highEnergy.coerceIn(0f, 1f), vocalPresence.coerceIn(0f, 1f), melodicPitchNormalized?.coerceIn(0f, 1f), spectralBrightness.coerceIn(0f, 1f), overallEnergy.coerceIn(0f, 1f), sectionId)
 }
 
-data class ParsedExperience(val schemaVersion: Int, val timeline: MusicTimeline, val sourceHash: SourceHash? = null)
+data class ParsedExperience(val schemaVersion: Int, val experience: TeleoExperience, val timeline: MusicTimeline, val sourceHash: SourceHash? = null)

@@ -52,6 +52,26 @@ seleccionada desde la galería.
 5. Teleo Música abre una actividad interna separada, `MusicActivity`, bloqueada en
    vertical, también inmersiva y con la pantalla encendida.
 
+### Flujo de Teleo Música
+
+1. La persona puede administrar perfiles Resonance self-hosted desde **Servidores**:
+   URL HTTPS, activación y, opcionalmente, Bearer protegido con Android Keystore.
+2. Teleo carga los catálogos de los perfiles habilitados; cada track remoto mantiene
+   `serverId`, por lo que dos servidores pueden publicar el mismo `trackId`.
+3. Al elegir una experiencia REMOTE, descarga o reutiliza la caché privada del mismo
+   servidor, valida duración/hash contra el audio local elegido y nunca descarga audio.
+4. El JSON validado sigue el recorrido `Teleo Music Protocol → TeleoExperience →
+   TeleoExperienceSampler → TeleoVisualState → renderer`.
+5. `ExoPlayer.currentPosition` es la única fuente de tiempo musical. El sampler
+   interpola frames por timestamps irregulares; el frame delta sólo mueve física y
+   easing visual. Canales remotos no confiables permanecen silenciosos y no reciben
+   fallback de `MockMusicAnalyzer`.
+6. El modo Mock continúa siendo una selección explícita, aislada de REMOTE; al salir
+   se detienen reproducción y vibración.
+7. Para desarrollo/prueba, **Importar experiencia local** abre un `experience.json`
+   mediante el selector del sistema, lo valida como protocolo v1 y luego solicita su
+   audio local; no usa catálogo, servidor ni caché REMOTE.
+
 ## Capacidades implementadas
 
 ### Palabra Viva
@@ -115,6 +135,11 @@ seleccionada desde la galería.
 - Cachea catálogo y experiencias remotas validadas por servidor en
   `filesDir/music_timelines/remote/<server-id>/`; conserva el caché previo de timelines Mock en
   `filesDir/music_timelines/<track-hash>.json`.
+- Convierte el protocolo remoto a `TeleoExperience` y lo consulta con
+  `TeleoExperienceSampler` por la posición de ExoPlayer; los frames remotos pueden
+  tener timestamps irregulares y los canales no confiables no se sustituyen con Mock.
+- Puede importar un `experience.json` local de Kinetra mediante `OpenDocument`; el
+  permiso de lectura se conserva cuando el proveedor lo permite y el JSON no se copia.
 - Tiene estados `Idle`, `TrackSelected`, `Analyzing`, `Countdown`, `Playing` y
   `Error`, coordinados por `MusicExperienceViewModel`.
 - Ofrece escenas Sinestesia, Carriles y Minimal; controles de calidad, instrumentos,
@@ -200,6 +225,7 @@ perteneciendo al módulo `:app`:
 | Emojis y emociones activados | Memoria de `MainActivity` |
 | Mensajes de Teleo Cerca | Memoria y payloads Nearby; se borran al desconectar |
 | Audio seleccionado | Permiso persistente al URI; Teleo no copia el audio |
+| Experiencia local importada | Permiso persistente al URI cuando está disponible; se lee sin copiarla |
 | Timeline Mock | JSON privado de la app en `filesDir/music_timelines` |
 | Perfiles Resonance | JSON privado de la app; no incluye tokens |
 | Bearer Resonance | Cifrado AES-GCM en preferencias privadas; clave en Android Keystore |
@@ -242,6 +268,8 @@ El mínimo soportado es Android 8.0 (API 26); `compileSdk` y `targetSdk` son 35.
 - CameraX `1.4.1`.
 - ML Kit Barcode Scanning `17.3.0` y ZXing Core `3.5.4`.
 - AndroidX Graphics Shapes `1.1.0`.
+- AndroidX Metrics Performance `1.0.0`, preparado para instrumentación futura con
+  JankStats.
 
 No hay Navigation Compose, Hilt/Koin, Room, Retrofit/Ktor, WorkManager ni Media3
 Session. Tampoco hay configuración de CI en el repositorio.

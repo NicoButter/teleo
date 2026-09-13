@@ -8,13 +8,16 @@ La experiencia no interactúa con implantes cocleares, no programa dispositivos 
 
 ## Runtime remoto Kinetra Resonance
 
-Teleo Música soporta dos fuentes explícitas:
+Teleo Música soporta tres fuentes explícitas:
 
 - **REMOTE:** Kinetra Resonance produce `teleo_experience.json`; Teleo descarga un
   catálogo y la experiencia estática por HTTPS, valida el contrato, la cachea y la
   reproduce sobre un audio local seleccionado por la persona.
 - **MOCK:** `MockMusicAnalyzer` permanece para demo, desarrollo y tests. Nunca se
   usa como fallback silencioso de una experiencia remota.
+- **LOCAL_IMPORT:** una experiencia `teleo-music` v1 seleccionada mediante
+  `OpenDocument` para desarrollo/prueba. No consulta servidor, catálogo ni caché
+  REMOTE y luego pide el audio local correspondiente.
 
 Teleo no analiza el audio ni ejecuta separación de stems, Demucs, RoFormer,
 Rhubarb o IA musical. Es el runtime player + renderer. `ExoPlayer.currentPosition`
@@ -115,6 +118,18 @@ parser de catálogo y experiencia usa Kotlinx Serialization JSON (`1.8.1`), ya
 declarado en Gradle; no usa `org.json`. No se agregó Media3 Session porque esta etapa
 no reproduce fuera de la actividad ni publica controles del sistema. Tampoco se
 agregó WorkManager: el análisis simulado es corto y se cancela junto con el ViewModel.
+
+También está declarada `androidx.metrics:metrics-performance:1.0.0` para una futura
+instrumentación con JankStats; este incremento no introduce un motor gráfico externo.
+
+### Señales REMOTE
+
+El recorrido de datos remoto es: **Teleo Music Protocol → TeleoExperience →
+TeleoExperienceSampler → TeleoVisualState → renderer**. El mapper normaliza DTOs sin
+decidir color o estilo; el sampler busca por timestamp e interpola únicamente entre
+frames vecinos. La posición que recibe proviene de `ExoPlayer.currentPosition`.
+Los frames no presuponen una cadencia fija. Canales `unreliable` o desconocidos no
+producen señales inventadas ni reciben fallback Mock.
 
 No se agregó `graphics-path`: `graphics-shapes` ya convierte el resultado del morph a un `android.graphics.Path`, que Compose puede dibujar directamente, y el laboratorio no inspecciona segmentos. Tampoco se incorporaron Rive, Lottie, libGDX, motores de juegos ni sistemas de partículas externos.
 

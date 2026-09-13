@@ -140,9 +140,16 @@ fun MusicExperienceRoute(
                 .onSuccess {
                     selectionError = null
                     if (state is MusicExperienceState.AwaitingAudio) viewModel.selectAudioForRemote(it)
+                    else if (state is MusicExperienceState.AwaitingImportedAudio) viewModel.selectAudioForImportedExperience(it)
                     else viewModel.selectTrack(it)
                 }
                 .onFailure { selectionError = "No se pudo leer el archivo seleccionado." }
+        }
+    }
+    val experiencePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            viewModel.importLocalExperience(uri)
         }
     }
     val leaveFeature = {
@@ -179,6 +186,7 @@ fun MusicExperienceRoute(
                 onBack = leaveFeature,
                 onOpenVoiceLab = { showVoiceVisualLab = true },
                 onOpenServers = { showServerProfiles = true },
+                onImportExperience = { experiencePicker.launch(arrayOf("application/json", "text/json", "text/*")) },
                 serverNames = serverProfiles.associate { it.id to it.name }
             )
             is MusicExperienceState.DownloadingExperience -> RemoteLoadingScreen("Descargando ${current.track.title}…", viewModel::backToCatalog)
@@ -189,6 +197,26 @@ fun MusicExperienceRoute(
                 onBack = viewModel::backToCatalog
             )
             is MusicExperienceState.ValidatingAudio -> RemoteLoadingScreen("Validando el audio seleccionado…", viewModel::backToCatalog)
+            is MusicExperienceState.AwaitingImportedAudio -> AwaitingImportedAudioScreen(
+                experience = current.experience,
+                error = current.validationError ?: selectionError,
+                onSelectAudio = { picker.launch(arrayOf("audio/*")) },
+                onBack = viewModel::backToCatalog
+            )
+            is MusicExperienceState.ValidatingImportedAudio -> RemoteLoadingScreen("Validando el audio seleccionado…", viewModel::backToCatalog)
+            is MusicExperienceState.ImportedReady -> MusicSelectionScreen(
+                track = current.track,
+                hapticsEnabled = hapticsEnabled,
+                selectedIntensity = selectedIntensity,
+                errorMessage = null,
+                onSelectTrack = { picker.launch(arrayOf("audio/*")) },
+                onPrepare = viewModel::prepare,
+                onHapticsChanged = { hapticsEnabled = it; viewModel.setHapticsEnabled(it) },
+                onIntensityChanged = { selectedIntensity = it; viewModel.setHapticIntensity(it) },
+                onBack = viewModel::backToCatalog,
+                onOpenVoiceLab = { showVoiceVisualLab = true },
+                sourceLabel = "IMPORTADA LOCAL · KINETRA"
+            )
             is MusicExperienceState.RemoteReady -> MusicSelectionScreen(
                 track = current.track,
                 hapticsEnabled = hapticsEnabled,
@@ -299,6 +327,7 @@ private fun RemoteCatalogScreen(
     onBack: () -> Unit,
     onOpenVoiceLab: () -> Unit,
     onOpenServers: () -> Unit,
+    onImportExperience: () -> Unit,
     serverNames: Map<String, String>
 ) {
     Column(
@@ -314,6 +343,9 @@ private fun RemoteCatalogScreen(
         warning?.let { Text(it, color = MusicYellow, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
         OutlinedButton(onClick = onOpenServers, modifier = Modifier.padding(top = 14.dp).testTag("music_server_profiles")) {
             Text("SERVIDORES")
+        }
+        OutlinedButton(onClick = onImportExperience, modifier = Modifier.padding(top = 10.dp).testTag("music_import_experience")) {
+            Text("IMPORTAR EXPERIENCIA LOCAL")
         }
         OutlinedButton(onClick = onRefresh, modifier = Modifier.padding(top = 14.dp).testTag("music_refresh_catalog")) {
             Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("ACTUALIZAR")
@@ -465,6 +497,25 @@ private fun AwaitingAudioScreen(experience: RemoteMusicExperience, error: String
         error?.let { Text(it, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp)) }
         Button(onClick = onSelectAudio, modifier = Modifier.padding(top = 22.dp).testTag("music_select_remote_audio"), colors = ButtonDefaults.buttonColors(containerColor = MusicCyan, contentColor = MusicDark)) { Text("ELEGIR AUDIO LOCAL") }
         Text("La experiencia usa datos remotos validados y el audio nunca se copia al almacenamiento privado.", color = Color.White.copy(alpha = .45f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp))
+    }
+}
+
+@Composable
+private fun AwaitingImportedAudioScreen(
+    experience: com.nicolas.teleo.features.music.domain.LocalImportedMusicExperience,
+    error: String?,
+    onSelectAudio: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        FeatureHeader("TELEO MÚSICA", "EXPERIENCIA IMPORTADA LOCAL", onBack)
+        Icon(Icons.Default.LibraryMusic, null, tint = MusicTeal, modifier = Modifier.size(64.dp))
+        Text(experience.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+        experience.artist?.let { Text(it, color = Color.White.copy(alpha = .65f)) }
+        Text("Seleccioná el audio local correspondiente (${formatTime(experience.timeline.durationMs)}).", color = Color.White.copy(alpha = .7f), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 14.dp))
+        error?.let { Text(it, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp)) }
+        Button(onClick = onSelectAudio, modifier = Modifier.padding(top = 22.dp).testTag("music_select_imported_audio"), colors = ButtonDefaults.buttonColors(containerColor = MusicTeal, contentColor = MusicDark)) { Text("ELEGIR AUDIO LOCAL") }
+        Text("El JSON se lee desde el documento seleccionado; Teleo no lo copia, no usa servidor y no descarga audio.", color = Color.White.copy(alpha = .45f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp))
     }
 }
 
@@ -668,6 +719,7 @@ fun MusicPlaybackScreen(
             isPlaying = state.isPlaying,
             playbackPositionProvider = playbackPositionProvider,
             settings = state.visualSettings,
+            teleoExperience = state.teleoExperience,
             modifier = Modifier.weight(1f).fillMaxWidth()
         )
         if (state.isRecoveringBuffer) {
@@ -770,6 +822,7 @@ private fun MusicVisualStage(
     isPlaying: Boolean,
     playbackPositionProvider: () -> Long,
     settings: MusicVisualSettings,
+    teleoExperience: com.nicolas.teleo.features.music.domain.TeleoExperience? = null,
     modifier: Modifier = Modifier
 ) {
     val lyric = timeline.activeLyricAt(positionMs)
@@ -788,6 +841,7 @@ private fun MusicVisualStage(
         } else {
             GenerativeMusicCanvas(
                 timeline = timeline,
+                teleoExperience = teleoExperience,
                 isPlaying = isPlaying,
                 playbackPositionProvider = playbackPositionProvider,
                 settings = settings,
