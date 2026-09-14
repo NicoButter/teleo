@@ -28,7 +28,8 @@ data class TeleoVisualState(
     val activeDrumImpulses: List<TeleoVisualImpulse> = emptyList(),
     val crossedEvents: List<MusicEvent> = emptyList(),
     val articulatedPose: MouthPose? = null,
-    val drumAccents: RhythmicBackgroundState? = null
+    val drumAccents: RhythmicBackgroundState? = null,
+    val ensemble: PremiumEnsembleState = PremiumEnsembleState()
 ) {
     fun asFeatureFrame(): MusicFeatureFrame = MusicFeatureFrame(
         timestampMs = positionMs,
@@ -47,6 +48,7 @@ data class TeleoVisualState(
 
 /** Timestamp-based sampler; it never owns or advances musical time. */
 class TeleoExperienceSampler(private val experience: TeleoExperience) {
+    private val ensemble = PremiumEnsembleSampler(experience)
     private val mouth = MouthArticulationTimeline(if (experience.isReliable("vocals")) experience.visemes else emptyList())
     private val rhythm = RhythmicBackgroundSampler(if (experience.isReliable("drums")) experience.drums else emptyList())
     // Prefix maximum end supports overlapping impulses without a full-song scan.
@@ -65,7 +67,7 @@ class TeleoExperienceSampler(private val experience: TeleoExperience) {
         val drums = if (experience.isReliable("drums")) experience.drums.subList(upperBound(drumEndPrefix, position - 1) { it }, upperBound(experience.drums, position) { it.startMs }).filter { position in it.startMs..(it.startMs + it.durationMs) }
             .map { TeleoVisualImpulse(it.type, it.intensity.clamp(), it.durationMs) } else emptyList()
         val crossed = if (previousPositionMs != null && position >= previousPositionMs) experience.timelineEvents.subList(upperBound(experience.timelineEvents, previousPositionMs) { it.timestampMs }, upperBound(experience.timelineEvents, position) { it.timestampMs }) else emptyList()
-        return TeleoVisualState(position, vocals, articulation, bass, ambient, drums, crossed, mouth.poseAt(position), rhythm.sample(position))
+        return TeleoVisualState(position, vocals, articulation, bass, ambient, drums, crossed, mouth.poseAt(position), rhythm.sample(position), ensemble.sample(position))
     }
 
     private fun interpolateVocal(frames: List<TeleoVocalFrame>, position: Long): TeleoVocalVisualSignal {

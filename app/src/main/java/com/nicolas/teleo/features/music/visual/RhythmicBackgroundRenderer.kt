@@ -93,7 +93,7 @@ class RhythmicBackgroundRenderer {
         val snare = drumEnvelope(state.positionMs, drums.snare, 260)
         val tom = drumEnvelope(state.positionMs, drums.tom, 850)
         val lightLimit = if (settings.limitBrightnessChanges) .6f else 1f
-        val color = Color(0xFF81B6D8).copy(alpha = .045f + (kick * .12f + snare * .08f + tom * .08f).coerceAtMost(.18f) * lightLimit)
+        val color = Color(0xFF81B6D8).copy(alpha = .065f + (kick * .22f + snare * .15f + tom * .15f).coerceAtMost(.28f) * lightLimit)
         for (row in 0..field.rows step step) {
             path.reset()
             for (column in 0..field.columns) {

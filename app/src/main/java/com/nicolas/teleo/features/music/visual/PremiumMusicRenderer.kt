@@ -19,11 +19,20 @@ fun DrawScope.drawPremiumMusicScene(
     state: PremiumMusicState,
     settings: MusicVisualSettings,
     mouthRenderer: ArticulatoryMouthRenderer,
-    backgroundRenderer: RhythmicBackgroundRenderer
+    backgroundRenderer: RhythmicBackgroundRenderer,
+    ensembleRenderer: PremiumEnsembleRenderer
 ) {
     drawPremiumAmbient(state, settings)
     if (VisualInstrument.RHYTHM in settings.visibleInstruments) backgroundRenderer.draw(this, state, settings)
-    if (VisualInstrument.VOICE in settings.visibleInstruments) mouthRenderer.draw(this, state.voice)
+    if (VisualInstrument.VOICE in settings.visibleInstruments) {
+        mouthRenderer.draw(this, state.voice,
+            center = Offset(size.width * .5f, size.height * .30f),
+            scale = minOf(size.minDimension * .72f, size.height * .48f),
+            backdropAlpha = .45f)
+    }
+    // Draw musical layers after the local mouth backdrop so it cannot erase them.
+    ensembleRenderer.draw(this, state, settings)
+    if (VisualInstrument.RHYTHM in settings.visibleInstruments) drawPremiumRhythmAccents(state, settings)
 }
 
 private fun DrawScope.drawPremiumAmbient(state: PremiumMusicState, settings: MusicVisualSettings) {
@@ -35,8 +44,8 @@ private fun DrawScope.drawPremiumAmbient(state: PremiumMusicState, settings: Mus
     drawCircle(
         brush = Brush.radialGradient(
             colors = listOf(
-                PremiumViolet.copy(alpha = (.08f + state.ambientMid * .11f) * brightness),
-                PremiumCyan.copy(alpha = (.025f + state.ambientHigh * .045f) * brightness),
+                PremiumViolet.copy(alpha = (.10f + state.ambientMid * .22f) * brightness),
+                PremiumCyan.copy(alpha = (.035f + state.ambientHigh * .10f) * brightness),
                 Color.Transparent
             ),
             center = center,

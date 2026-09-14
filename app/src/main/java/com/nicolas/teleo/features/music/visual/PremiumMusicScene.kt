@@ -32,7 +32,8 @@ data class PremiumMusicState(
     val snare: PremiumDrumAccent = PremiumDrumAccent(),
     val hiHat: PremiumDrumAccent = PremiumDrumAccent(),
     val cymbal: PremiumDrumAccent = PremiumDrumAccent(),
-    val tom: PremiumDrumAccent = PremiumDrumAccent()
+    val tom: PremiumDrumAccent = PremiumDrumAccent(),
+    val ensemble: PremiumEnsembleState = PremiumEnsembleState()
 )
 
 /**
@@ -73,6 +74,7 @@ class PremiumMusicScene {
         val pitchTarget = sample.vocals.pitchNormalized ?: .5f
         state = PremiumMusicState(
             positionMs = sample.positionMs,
+            ensemble = sample.ensemble,
             voice = PremiumVoiceState(
                 pose = targetPose,
                 viseme = targetViseme,

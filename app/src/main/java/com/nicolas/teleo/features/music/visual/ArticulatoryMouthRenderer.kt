@@ -41,13 +41,13 @@ class ArticulatoryMouthRenderer {
     private val tonguePaint = Brush.verticalGradient(listOf(Color(0xFFEE8D9D), Color(0xFFA33C62)), -.12f, .45f)
     private val backdrop = Brush.radialGradient(listOf(Color(0xFF090C1A), Color(0xFA090C1A), Color.Transparent), Offset.Zero, .95f)
 
-    fun draw(scope: DrawScope, voice: PremiumVoiceState, center: Offset = Offset(scope.size.width * .5f, scope.size.height * .39f), scale: Float = scope.size.minDimension * .72f) = with(scope) {
+    fun draw(scope: DrawScope, voice: PremiumVoiceState, center: Offset = Offset(scope.size.width * .5f, scope.size.height * .39f), scale: Float = scope.size.minDimension * .72f, backdropAlpha: Float = 1f) = with(scope) {
         val pose = voice.pose
         val g = MouthGeometry.from(pose)
         val w = g.halfWidth
         // Intensity affects a small highlight only. Pitch cannot move the reading target.
         withTransform({ translate(center.x, center.y); scale(scale, scale, Offset.Zero) }) {
-            drawCircle(backdrop, .95f, Offset.Zero)
+            drawCircle(backdrop, .95f, Offset.Zero, alpha = backdropAlpha)
             // Jaw/chin support follows opening, behind the lips, without a second mouth outline.
             drawOval(Color(0xFFBB718B).copy(alpha = .10f), Offset(-w * 1.12f, .025f), Size(w * 2.24f, .24f + pose.jawOpen * .53f))
             detail.reset()

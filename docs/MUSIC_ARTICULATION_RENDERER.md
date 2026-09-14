@@ -93,8 +93,8 @@ sobrescribir tom/cymbal con OTHER; ahora comparte el mapeo de familia del domini
 
 El fondo mantiene bajo contraste y la boca tiene una zona oscura de lectura.
 Premium no dibuja encima las partículas genéricas del motor anterior. Ocultar
-RHYTHM oculta la malla; ocultar VOICE oculta la boca. El control de partículas sigue
-operando en las otras escenas. Movimiento reducido atenúa la deformación al 18 %
+RHYTHM oculta la malla; ocultar VOICE oculta la boca. El control de partículas activa las partículas instrumentales acotadas de Premium
+y conserva su comportamiento en las otras escenas. Movimiento reducido atenúa la deformación al 18 %
 y reduce líneas; desactivar destellos conserva una señal periférica muy tenue.
 
 ## Rendimiento
@@ -174,3 +174,32 @@ alineación del JSON externo siguen limitando la articulación.
 El siguiente paso es revisar sin audio A/F/G/H/X con personas que utilizan lectura
 labial, ajustar geometría/contactos con sus observaciones y medir fluidez en un
 Android físico de gama media. No se propone reemplazar el stack visual.
+
+## Composición Premium completa (seguimiento)
+
+El primer incremento había dejado fuera del dibujo Premium el bajo, guitarra y
+piano. Ahora `PremiumEnsembleSampler` indexa sus eventos del timeline remoto ya
+normalizado (incluye las notas de `bass/guitar/piano.notes` mapeadas por el parser).
+Cada canal respeta su calidad. Las envolventes visuales tienen 20 ms de ataque,
+160 ms de salida y un sostén visual mínimo de 100 ms para eventos instantáneos;
+no se alteran tiempos de reproducción ni háptica. Notas solapadas conservan la
+intensidad máxima activa y una nota larga sigue visible al terminar otra corta.
+
+`PremiumEnsembleRenderer` dibuja bajo como onda gruesa, guitarra como tres cuerdas
+y piano como barras; cada uno tiene partículas acotadas, desactivables y cuya fase
+se calcula desde la posición de reproducción. El piano responde como conjunto:
+no simula teclas/alturas que el timeline de eventos no conserva. Las guías tenues
+en reposo muestran la distribución de la escena, sin animar canales sin eventos.
+
+La boca conserva sus poses y geometría. Su ubicación/escala se adapta a la parte
+superior y su fondo local tiene menor opacidad. Las capas de instrumentos se
+componen después para que ese fondo no las oculte. Kick/snare/tom también tienen
+acentos geométricos más visibles; la malla aumenta moderadamente su contraste.
+El indicador de sección consulta los eventos reales de sección. Las letras
+siguen disponibles y la etiqueta de visema se mueve a una esquina en Premium.
+
+Validación de este seguimiento: pruebas JVM de recorrido JSON→sampler→escena,
+canales ausentes/no confiables, solapamientos y seek. La prueba instrumentada de
+composición verifica que las tres capas aportan píxeles con la boca visible,
+respetan sus toggles y no alteran la zona articulatoria. Requiere un Android
+operativo; no había ninguno conectado al consultar ADB en esta sesión.

@@ -35,6 +35,7 @@ import com.nicolas.teleo.features.music.visual.ParticleSemanticRole
 import com.nicolas.teleo.features.music.visual.ParticleShape
 import com.nicolas.teleo.features.music.visual.ArticulatoryMouthRenderer
 import com.nicolas.teleo.features.music.visual.RhythmicBackgroundRenderer
+import com.nicolas.teleo.features.music.visual.PremiumEnsembleRenderer
 import com.nicolas.teleo.features.music.visual.PremiumMusicScene
 import com.nicolas.teleo.features.music.visual.drawPremiumMusicScene
 import kotlinx.coroutines.isActive
@@ -62,6 +63,7 @@ fun GenerativeMusicCanvas(
     val secondaryWavePath = remember { Path() }
     val particlePath = remember { Path() }
     val organicPath = remember { Path() }
+    val ensembleRenderer = remember { PremiumEnsembleRenderer() }
     val mouthRenderer = remember { ArticulatoryMouthRenderer() }
     val backgroundRenderer = remember { RhythmicBackgroundRenderer() }
     val currentSettings by rememberUpdatedState(settings)
@@ -143,7 +145,7 @@ fun GenerativeMusicCanvas(
         @Suppress("UNUSED_VARIABLE")
         val invalidateCanvasOnly = renderTick
         if (settings.preset == VisualPreset.PREMIUM && sampler != null) {
-            drawPremiumMusicScene(premiumScene.state, settings, mouthRenderer, backgroundRenderer)
+            drawPremiumMusicScene(premiumScene.state, settings, mouthRenderer, backgroundRenderer, ensembleRenderer)
         } else {
             drawGenerativeBackground(features, settings, positionMs)
             if (settings.preset == VisualPreset.SYNESTHETIC) {

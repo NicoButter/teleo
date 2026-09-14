@@ -842,6 +842,10 @@ private fun MusicVisualStage(
     val viseme = timeline.activeVisemeAt(positionMs)
     val interpolator = remember { LinearMusicFeatureInterpolator() }
     val features = interpolator.interpolate(timeline.featureFrames, positionMs)
+    val ensembleSampler = remember(teleoExperience) {
+        teleoExperience?.let { com.nicolas.teleo.features.music.visual.PremiumEnsembleSampler(it) }
+    }
+    val section = if (ensembleSampler != null) ensembleSampler.sample(positionMs).section else features.sectionId
     Box(
         modifier = modifier.padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp))
             .border(1.dp, MusicCyan.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
@@ -875,7 +879,7 @@ private fun MusicVisualStage(
                 border = BorderStroke(1.dp, MusicTeal.copy(alpha = 0.4f))
             ) {
                 Text(
-                    "SECCIÓN · ${features.sectionId?.uppercase() ?: "—"}",
+                    "SECCIÓN · ${section?.uppercase() ?: "—"}",
                     color = MusicTeal,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -884,7 +888,8 @@ private fun MusicVisualStage(
             }
             viseme?.let {
                 Surface(
-                    modifier = Modifier.align(Alignment.Center).padding(top = 52.dp),
+                    modifier = if (settings.preset == VisualPreset.PREMIUM) Modifier.align(Alignment.BottomStart).padding(10.dp)
+                        else Modifier.align(Alignment.Center).padding(top = 52.dp),
                     color = MusicMagenta.copy(alpha = 0.18f),
                     shape = CircleShape,
                     border = BorderStroke(2.dp, MusicMagenta.copy(alpha = .75f))
@@ -893,7 +898,7 @@ private fun MusicVisualStage(
                         it.shape.name,
                         color = Color.White,
                         fontWeight = FontWeight.Black,
-                        fontSize = (28 + it.intensity * 18).sp,
+                        fontSize = if (settings.preset == VisualPreset.PREMIUM) 12.sp else (28 + it.intensity * 18).sp,
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
                     )
                 }

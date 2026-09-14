@@ -8,21 +8,21 @@
 
 - **Fecha de revisión:** 14 de septiembre de 2026.
 - **Rama revisada:** `main`.
-- **Commit base:** `6c35800` —
-  `feat: Enhance Teleo Music with Premium Scene, Torch Flash, and Remote Haptics`,
-  más el incremento articulatorio local sin commit.
+- **Commit base:** `12a9e10` —
+  `feat: Implement mouth articulation and rhythmic background rendering`,
+  más la composición instrumental Premium local sin commit.
 - **Aplicación:** Android nativa, un único módulo Gradle (`:app`).
 - **Identificador:** `com.nicolas.teleo`.
 - **Versión declarada:** `1.0` (`versionCode = 1`).
 - **Estado de compilación al revisar:**
-  `testDebugUnitTest` (64 pruebas, cero fallos),
+  `testDebugUnitTest` (67 pruebas, cero fallos),
   `compileDebugAndroidTestKotlin` y `assembleDebug` completados.
   `connectedDebugAndroidTest` no pudo ejecutar: `No connected devices`.
   El emulador local terminó con código 139 en tres configuraciones de arranque;
   la revisión visual de las nuevas poses sigue pendiente.
 
 Este documento describe el código del commit indicado más los cambios locales
-del renderer articulatorio y del fondo de percusión. Si una afirmación contradice al código, al
+de la composición Premium completa con instrumentos. Si una afirmación contradice al código, al
 manifest, a Gradle o a una prueba, esas fuentes técnicas tienen prioridad y este
 archivo debe corregirse.
 
@@ -165,6 +165,11 @@ seleccionada desde la galería.
   luz periférica para cymbal/hi-hat, usando índices temporales del JSON confiable.
   Pausa y seek vuelven a muestrear desde la posición del reproductor; la intensidad
   no abre labios cerrados y el pitch no desplaza el foco de lectura.
+- Premium incluye bajo (onda gruesa), guitarra (cuerdas), piano (barras), partículas
+  acotadas y acentos visibles de percusión, conservando la anatomía de la boca.
+  `PremiumEnsembleSampler` consulta eventos reales por instrumento y sección con
+  búsqueda binaria y soporte de notas solapadas. Canales ausentes/no confiables no
+  reciben actividad inventada. El fondo local de la boca ya no tapa estas capas.
 - Voice Visual Lab incluye **Boca**, un inspector de poses fijas que reutiliza el
   renderer de reproducción. No agrega dependencias ni persistencia.
 - Detalles y limitaciones: [Renderer articulatorio](MUSIC_ARTICULATION_RENDERER.md).

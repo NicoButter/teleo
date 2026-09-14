@@ -175,6 +175,13 @@ articulatorio, sus límites y su validación está en
 - La intensidad vocal solo modifica ligeramente el brillo labial; el pitch se
   ignora para mantener estable el foco de lectura. La articulación no depende de
   la presencia/intensidad ni se abre artificialmente con ellas.
+- `PremiumEnsembleSampler` consulta bajo/guitarra/piano y sección desde el timeline
+  real ya normalizado; conserva notas sostenidas y solapadas. El renderer dibuja
+  ondas gruesas de bajo, tres cuerdas de guitarra, barras de piano y partículas
+  deterministas alrededor de esos instrumentos. No representa un pitch ausente.
+- La boca se ubica arriba y deja una zona inferior para instrumentos; su anatomía
+  se conserva. El fondo local se atenúa y las capas instrumentales se dibujan
+  después de él. El código del visema queda pequeño en una esquina.
 - Premium no superpone las partículas genéricas a la boca. Movimiento reducido
   atenúa el fondo, pero conserva las claves articulatorias; los controles de
   destellos y brillo limitan la luz periférica, sin flashes de pantalla completa.

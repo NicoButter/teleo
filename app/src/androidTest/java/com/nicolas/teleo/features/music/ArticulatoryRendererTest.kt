@@ -105,6 +105,32 @@ class ArticulatoryRendererTest {
         save(background, "rhythm-families.png")
     }
 
+    @Test fun premiumInstrumentLayersRemainVisibleWithMouthAndRespectToggles() {
+        val signal = PremiumInstrumentSignal(1f, 100)
+        val state = PremiumMusicState(positionMs = 200,
+            voice = PremiumVoiceState(RhubarbMouthPoseMapper.poseFor(VocalVisemeShape.H)),
+            ensemble = PremiumEnsembleState(signal, signal, signal))
+        fun render(settings: MusicVisualSettings): IntArray {
+            val bitmap = Bitmap.createBitmap(480, 800, Bitmap.Config.ARGB_8888)
+            val mouth = ArticulatoryMouthRenderer()
+            val rhythm = RhythmicBackgroundRenderer()
+            val ensemble = PremiumEnsembleRenderer()
+            CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, Canvas(bitmap.asImageBitmap()), Size(480f, 800f)) {
+                drawPremiumMusicScene(state, settings, mouth, rhythm, ensemble)
+            }
+            return IntArray(480 * 800).also { bitmap.getPixels(it, 0, 480, 0, 0, 480, 800) }
+        }
+        val settings = MusicVisualSettings(preset = VisualPreset.PREMIUM)
+        val all = render(settings)
+        for (instrument in listOf(VisualInstrument.BASS, VisualInstrument.GUITAR, VisualInstrument.PIANO)) {
+            val hidden = render(settings.copy(visibleInstruments = settings.visibleInstruments - instrument))
+            assertFalse("$instrument is actually drawn", all.contentEquals(hidden))
+            // Instrument controls must not change the articulation pixels above the lower stage.
+            assertArrayEquals(all.copyOfRange(0, 480 * 400), hidden.copyOfRange(0, 480 * 400))
+        }
+        assertFalse(all.contentEquals(render(settings.copy(particlesEnabled = false))))
+    }
+
     private fun save(bitmap: Bitmap, name: String) {
         val directory = InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir("visual-review")!!
         directory.mkdirs()
