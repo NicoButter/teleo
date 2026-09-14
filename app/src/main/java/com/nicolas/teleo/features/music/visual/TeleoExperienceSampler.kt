@@ -13,6 +13,7 @@ data class TeleoVocalVisualSignal(
     val presence: Float = 0f,
     val intensity: Float = 0f,
     val pitchNormalized: Float? = null,
+    val pitchConfidence: Float = 0f,
     val spectralBrightness: Float = 0f
 )
 data class TeleoBassVisualSignal(val midi: Int?, val pitch: Float?, val intensity: Float, val confidence: Float)
@@ -64,7 +65,13 @@ class TeleoExperienceSampler(private val experience: TeleoExperience) {
         val (a, b, fraction) = pair
         val confidence = lerp(a.pitchConfidence, b.pitchConfidence, fraction).clamp()
         val pitch = if (confidence >= MIN_PITCH_CONFIDENCE) nullableLerp(a.pitchNormalized, b.pitchNormalized, fraction)?.clamp() else null
-        return TeleoVocalVisualSignal(lerp(a.presence, b.presence, fraction).clamp(), lerp(a.intensity, b.intensity, fraction).clamp(), pitch, lerp(a.spectralBrightness, b.spectralBrightness, fraction).clamp())
+        return TeleoVocalVisualSignal(
+            presence = lerp(a.presence, b.presence, fraction).clamp(),
+            intensity = lerp(a.intensity, b.intensity, fraction).clamp(),
+            pitchNormalized = pitch,
+            pitchConfidence = confidence,
+            spectralBrightness = lerp(a.spectralBrightness, b.spectralBrightness, fraction).clamp()
+        )
     }
 
     private fun interpolateAmbient(frames: List<TeleoAmbientFrame>, position: Long): TeleoAmbientVisualSignal {

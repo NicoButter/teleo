@@ -80,8 +80,12 @@ diagnóstico/future compatibility sin imponerles un esquema rígido.
 
 Los visemas usan códigos visuales Rhubarb `A B C D E F G H X`; no son etiquetas de
 fonemas. Teleo los consulta con búsqueda binaria según `startMs <= position < endMs`
-y hoy los muestra como señal visual sincronizada. La futura capa
-`TeleoArticulationMapper → MouthPose` podrá consumir el mismo dominio.
+y los transforma mediante `RhubarbMouthPoseMapper → MouthPose` para la boca visible
+de la escena Premium.
+
+Cuando `haptics` incluye eventos se respeta ese canal explícito. Cuando viene vacío,
+`RemoteHapticComposer` deriva señales solo de batería, bajo y secciones confiables
+del mismo documento: no agrega datos de Mock.
 
 La versión de esquema (`version`) y la revisión concreta (`experienceVersion`) son
 independientes. Una versión de esquema desconocida se rechaza con “Esta experiencia
@@ -112,7 +116,9 @@ Teleo utiliza Compose y navegación manual con `Screen`. Las funciones históric
 - `data`: analizador simulado, resolución de metadatos del URI, JSON y repositorio de timelines.
 - `playback`: contrato de reproducción e implementación Media3 ExoPlayer.
 - `haptics`: contrato háptico e implementación con las APIs oficiales de Android.
-- `visual`: interpolador musical, escenas, emisores, pool y motor de partículas determinista.
+- `torch`: política de acentos, rate limiter y adaptación opcional a `CameraManager`.
+- `visual`: interpolador musical, escena Premium, compositor `MouthPose`, renderer
+  Canvas, emisores, pool y motor de partículas determinista.
 - `ui`: pantallas Compose de selección, preparación, cuenta regresiva y reproducción.
 - `MusicExperienceViewModel`: estado central y coordinación de análisis, caché, reproducción, búfer, visualización y háptica.
 
@@ -142,6 +148,43 @@ frames vecinos. La posición que recibe proviene de `ExoPlayer.currentPosition` 
 audio o del reloj visual de una importación sin audio. Los frames no presuponen una
 cadencia fija. Canales `unreliable` o desconocidos no producen señales inventadas ni
 reciben fallback Mock.
+
+### Escena Premium REMOTE
+
+REMOTE selecciona **Premium** como escena inicial y conserva Sinestesia, Carriles y
+Minimal como opciones. `PremiumMusicScene` compone estado estable sin poseer el
+reloj; `PremiumMusicRenderer` lo dibuja con Canvas/Compose.
+
+Cada grupo Rhubarb `A B C D E F G H X` tiene un `MouthPose` con apertura, ancho,
+redondez, caída de mandíbula, elevación del labio, dientes y lengua. La pose activa
+se combina con `presence`, `intensity`, `pitchNormalized`, `pitchConfidence` y
+`spectralBrightness`. Un filtro exponencial suaviza pose y señales; el pitch solo
+desplaza la boca cuando su confianza es suficiente. La boca conserva contorno,
+cavidad interior y claves de dientes/lengua para ser reconocible por forma.
+
+La batería tampoco depende solo del color: kick usa anillos profundos inferiores;
+snare, fragmentos laterales; hi-hat, una chispa periférica; cymbal, un arco amplio;
+y tom, óvalos intermedios alternados. `other.frames` controla gradientes y contornos
+ambientales. Movimiento reducido disminuye expansión y cantidad de elementos; al
+desactivar destellos, hi-hat y cymbal permanecen geométricamente visibles con brillo
+atenuado. No hay flashes de pantalla completa.
+
+La implementación usa Canvas en API 26+ y no activa AGSL/`RuntimeShader` todavía.
+AGSL queda reservado como mejora progresiva para Android 13+; no es necesario para
+la escena ni altera el fallback.
+
+### Háptica y torch
+
+Los patrones son: kick fuerte breve; snare doble; hi-hat mínimo y desactivado por
+defecto; bajo más largo y opcional; sección en tres etapas; cymbal intenso en dos
+etapas. Bajo y hi-hat pueden habilitarse durante la reproducción. Pausa, seek y salida
+cancelan el vibrador inmediatamente.
+
+`Torch flash · experimental` está apagado por defecto. Solo acepta cymbal con
+intensidad suficiente, inicio de sección o un acento explícitamente rotulado; limita
+los pulsos a 65 ms y exige al menos 1,2 s entre ellos. Pausa, seek, salida o apagar el
+toggle fuerzan torch off. Si falta `CAMERA`, no existe flash o Camera2 rechaza la
+operación, el controlador no interrumpe la experiencia.
 
 No se agregó `graphics-path`: `graphics-shapes` ya convierte el resultado del morph a un `android.graphics.Path`, que Compose puede dibujar directamente, y el laboratorio no inspecciona segmentos. Tampoco se incorporaron Rive, Lottie, libGDX, motores de juegos ni sistemas de partículas externos.
 

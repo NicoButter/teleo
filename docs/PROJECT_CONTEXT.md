@@ -6,7 +6,7 @@
 
 ## Fotografía verificada
 
-- **Fecha de revisión:** 13 de agosto de 2026.
+- **Fecha de revisión:** 13 de septiembre de 2026.
 - **Rama revisada:** `main`.
 - **Commit base:** `e45ae40d142f26b20c19eea8a25cb963772add96` —
   `feat: Implement Voice Visual Lab with interactive controls and visualizations`.
@@ -36,7 +36,7 @@ La aplicación tiene cuatro experiencias visibles desde Inicio:
 | **Palabra Viva** | Transcribe voz con `SpeechRecognizer`, muestra resultados parciales y finales, y ofrece modo continuo o pulsar-para-hablar. | `MainActivity.kt` |
 | **Escribir** | Permite escribir un mensaje y presentarlo con tipografía grande en pantalla. | `MainActivity.kt` |
 | **Teleo Cerca** | Conecta dispositivos próximos mediante Google Nearby Connections, con creación/unión de charla, QR, mensajes escritos y transcripción compartida. | `MainActivity.kt` |
-| **Teleo Música** | Descarga experiencias temporales Kinetra Resonance desde JSON estático HTTPS, las cachea y las sincroniza con un audio local mediante ExoPlayer. El modo Mock y Voice Visual Lab siguen siendo simulados explícitos. | `features/music/` |
+| **Teleo Música** | Descarga experiencias temporales Kinetra Resonance desde JSON estático HTTPS, las cachea y las sincroniza con un audio local mediante ExoPlayer. REMOTE ofrece una escena Premium articulatoria, háptica derivada del protocolo y torch opcional; Mock y Voice Visual Lab siguen siendo simulados explícitos. | `features/music/` |
 
 También existe un perfil local con nickname, color e imagen tomada con cámara o
 seleccionada desde la galería.
@@ -152,8 +152,16 @@ seleccionada desde la galería.
 - Tiene estados `Idle`, `TrackSelected`, `Analyzing`, `Countdown`, `Playing` y
   `Error`, coordinados por `MusicExperienceViewModel`.
 - Ofrece escenas Sinestesia, Carriles y Minimal; controles de calidad, instrumentos,
-  partículas, destellos, movimiento reducido, letra y ajuste de sincronía.
-- Genera pulsos hápticos para eventos y los cancela al pausar, buscar o salir.
+  partículas, destellos, movimiento reducido, letra y ajuste de sincronía. REMOTE
+  selecciona inicialmente la escena Premium, sin eliminar las escenas anteriores.
+- La escena Premium transforma visemas Rhubarb en `MouthPose`, combina presencia,
+  intensidad, pitch/confianza y brillo vocal con easing, diferencia batería por
+  geometría/posición y usa `other.frames` como ambiente.
+- Si Kinetra no publica `haptics`, compone pulsos solo desde eventos confiables del
+  mismo protocolo (nunca Mock). Los cancela al pausar, buscar o salir.
+- Ofrece `Torch flash` experimental, apagado por defecto, limitado a acentos
+  elegibles con intervalo mínimo de 1,2 s y pulso máximo de 65 ms. Sin permiso o
+  flash de hardware se mantiene como no-op silencioso.
 - El detalle de modelos, render, letras, caché, háptica y decisiones se mantiene en
   [`TELEO_MUSIC.md`](TELEO_MUSIC.md).
 
@@ -194,6 +202,7 @@ teleo/
 │       │   │       ├── haptics/
 │       │   │       ├── playback/
 │       │   │       ├── ui/
+│       │   │       ├── torch/
 │       │   │       └── visual/
 │       │   └── res/
 │       ├── test/
@@ -222,6 +231,7 @@ perteneciendo al módulo `:app`:
 - `data`: resolución del URI, analizador simulado, letras y repositorio JSON.
 - `playback`: contrato e integración con ExoPlayer.
 - `haptics`: contrato y adaptación a vibración Android.
+- `torch`: política, rate limit y adaptación opcional a `CameraManager`.
 - `visual`: interpolación, escenas, partículas y lenguaje visual de voz.
 - `ui`: selección, preparación, reproducción, Canvas y laboratorio.
 - `MusicExperienceViewModel`: orquestación de estado, caché, reproducción y háptica.
@@ -255,7 +265,8 @@ El código no carga `.env` ni consume una URL fija desde `local.properties`.
 
 - Micrófono: `RECORD_AUDIO`.
 - Vibración: `VIBRATE`.
-- Cámara opcional: `CAMERA`, usada para avatar y QR.
+- Cámara opcional: `CAMERA`, usada para avatar, QR y torch experimental cuando el
+  permiso ya está disponible. El manifest declara cámara y flash como hardware no requerido.
 - Nearby según versión Android: ubicación hasta Android 12L, Bluetooth
   scan/advertise/connect desde Android 12 y `NEARBY_WIFI_DEVICES` desde Android 13.
 - Estado y modificación de Wi-Fi, más permisos Bluetooth heredados para versiones
@@ -327,8 +338,8 @@ la desinstalación elimina sus datos locales. Debe usarse de forma consciente.
 - La versión sigue en `1.0`/`1` pese al alcance experimental añadido.
 - Las capturas referenciadas por versiones antiguas del README no existen en el
   repositorio actual.
-- El render remoto admite el contrato v1 de Kinetra; no aplica aún un renderer
-  articulatorio avanzado para visemas Rhubarb, aunque los sincroniza y expone.
+- La escena Premium usa Canvas/Compose en todas las APIs soportadas. No incorpora
+  todavía AGSL/`RuntimeShader`; queda como mejora progresiva posible para Android 13+.
 - No se verificaron pruebas instrumentadas en esta revisión porque requieren un
   dispositivo o emulador conectado.
 

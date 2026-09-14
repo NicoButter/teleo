@@ -24,6 +24,7 @@ import com.nicolas.teleo.features.music.domain.TeleoVocalFrame
 import com.nicolas.teleo.features.music.domain.LocalImportedMusicExperience
 import com.nicolas.teleo.features.music.domain.VocalVisemeEvent
 import com.nicolas.teleo.features.music.domain.VocalVisemeShape
+import com.nicolas.teleo.features.music.haptics.RemoteHapticComposer
 import java.io.File
 import java.net.URI
 import java.util.concurrent.TimeUnit
@@ -406,7 +407,9 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
             addAll(dto.timeline.events.map { it.toEvent(MusicEventType.OTHER) })
             addAll(dto.sections.map { MusicEvent(it.startMs, 0, MusicEventType.SECTION_START, 1f, it.name) })
         }.sortedBy(MusicEvent::timestampMs)
-        val haptics = dto.haptics.map { it.toEvent(hapticType(it.type)) }.sortedBy(MusicEvent::timestampMs)
+        val channelQuality = dto.channelsQuality.asMap().mapValues { (_, quality) -> quality.status.toTeleoChannelQuality() }
+        val explicitHaptics = dto.haptics.map { it.toEvent(hapticType(it.type)) }
+        val haptics = RemoteHapticComposer.compose(explicitHaptics, events, channelQuality)
         val lyrics = dto.lyrics.mapIndexed { index, item ->
             TimedLyricLine(item.id ?: "remote-$index-${item.startMs}", item.startMs, item.endMs, item.text, item.language, item.translations,
                 item.words.map { TimedLyricWord(it.text, it.startMs, it.endMs) })
@@ -427,7 +430,7 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
             visemes = visemes,
             ambientFrames = ambientFrames.sortedBy(TeleoAmbientFrame::timestampMs),
             timelineEvents = events,
-            channelQuality = dto.channelsQuality.asMap().mapValues { (_, quality) -> quality.status.toTeleoChannelQuality() }
+            channelQuality = channelQuality
         )
         return ParsedExperience(dto.version, experience, MusicTimeline(catalogTrack.id, dto.track.durationMs, dto.track.bpm, catalogTrack.experienceVersion, events, lyrics, frames, visemes, haptics), dto.track.sourceHash?.toDomain())
     }

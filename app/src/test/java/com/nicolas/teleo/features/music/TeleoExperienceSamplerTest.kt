@@ -27,6 +27,7 @@ class TeleoExperienceSamplerTest {
         val state = sampler.sample(300)
         assertEquals(.25f, state.vocals.presence, .001f)
         assertEquals(.3f, state.vocals.pitchNormalized!!, .001f)
+        assertEquals(.9f, state.vocals.pitchConfidence, .001f)
         assertEquals(.25f, state.ambient.lowEnergy, .001f)
         val lowConfidence = TeleoExperienceSampler(TeleoExperience(vocalFrames = listOf(TeleoVocalFrame(0, 1f, 1f, null, .8f, .2f, 1f))))
         assertNull(lowConfidence.sample(0).vocals.pitchNormalized)

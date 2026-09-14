@@ -294,12 +294,15 @@ fun MusicExperienceRoute(
                     selectedIntensity = it
                     viewModel.setHapticIntensity(it)
                 },
+                onBassHapticsChanged = viewModel::setBassHapticsEnabled,
+                onHiHatHapticsChanged = viewModel::setHiHatHapticsEnabled,
                 onSyncOffsetChanged = viewModel::setSyncOffset,
                 playbackPositionProvider = viewModel::playbackPositionNow,
                 onVisualPresetChanged = viewModel::setVisualPreset,
                 onVisualQualityChanged = viewModel::setVisualQuality,
                 onReducedMotionChanged = viewModel::setReducedMotion,
                 onFlashesChanged = viewModel::setFlashesEnabled,
+                onTorchFlashChanged = viewModel::setTorchFlashEnabled,
                 onStableLyricsChanged = viewModel::setStableLyrics,
                 onIntenseVisualWarningChanged = viewModel::setIntenseVisualWarningEnabled,
                 onParticlesEnabledChanged = viewModel::setParticlesEnabled,
@@ -691,12 +694,15 @@ fun MusicPlaybackScreen(
     onSeek: (Long) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
     onIntensityChanged: (HapticIntensity) -> Unit,
+    onBassHapticsChanged: (Boolean) -> Unit = {},
+    onHiHatHapticsChanged: (Boolean) -> Unit = {},
     onSyncOffsetChanged: (Int) -> Unit,
     playbackPositionProvider: () -> Long = { state.playbackPositionMs },
     onVisualPresetChanged: (VisualPreset) -> Unit = {},
     onVisualQualityChanged: (VisualQuality) -> Unit = {},
     onReducedMotionChanged: (Boolean) -> Unit = {},
     onFlashesChanged: (Boolean) -> Unit = {},
+    onTorchFlashChanged: (Boolean) -> Unit = {},
     onStableLyricsChanged: (Boolean) -> Unit = {},
     onIntenseVisualWarningChanged: (Boolean) -> Unit = {},
     onParticlesEnabledChanged: (Boolean) -> Unit = {},
@@ -774,6 +780,8 @@ fun MusicPlaybackScreen(
                 )
             }
             IntensityChips(selectedIntensity, onIntensityChanged, compact = true)
+            AccessibilitySwitch("Bajo háptico", state.hapticSettings.bassEnabled, onBassHapticsChanged, "music_haptic_bass")
+            AccessibilitySwitch("Hi-hat háptico", state.hapticSettings.hiHatEnabled, onHiHatHapticsChanged, "music_haptic_hi_hat")
             Text("Sincronía ${state.syncOffsetMs} ms", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
             OutlinedButton(onClick = { onSyncOffsetChanged(state.syncOffsetMs - 50) }, enabled = state.syncOffsetMs > -250) {
                 Text("−50")
@@ -784,10 +792,12 @@ fun MusicPlaybackScreen(
         }
         VisualControls(
             settings = state.visualSettings,
+            showTorchFlash = state.source == MusicExperienceSource.REMOTE,
             onPresetChanged = onVisualPresetChanged,
             onQualityChanged = onVisualQualityChanged,
             onReducedMotionChanged = onReducedMotionChanged,
             onFlashesChanged = onFlashesChanged,
+            onTorchFlashChanged = onTorchFlashChanged,
             onStableLyricsChanged = onStableLyricsChanged,
             onIntenseVisualWarningChanged = onIntenseVisualWarningChanged,
             onParticlesEnabledChanged = onParticlesEnabledChanged,
@@ -974,10 +984,12 @@ private fun highlightedOriginal(lyric: TimedLyricLine, positionMs: Long) = build
 @Composable
 private fun VisualControls(
     settings: MusicVisualSettings,
+    showTorchFlash: Boolean,
     onPresetChanged: (VisualPreset) -> Unit,
     onQualityChanged: (VisualQuality) -> Unit,
     onReducedMotionChanged: (Boolean) -> Unit,
     onFlashesChanged: (Boolean) -> Unit,
+    onTorchFlashChanged: (Boolean) -> Unit,
     onStableLyricsChanged: (Boolean) -> Unit,
     onIntenseVisualWarningChanged: (Boolean) -> Unit,
     onParticlesEnabledChanged: (Boolean) -> Unit,
@@ -992,7 +1004,7 @@ private fun VisualControls(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("ESCENA", color = MusicCyan, fontSize = 10.sp, fontWeight = FontWeight.Black)
-            listOf(VisualPreset.SYNESTHETIC, VisualPreset.LANES, VisualPreset.MINIMAL).forEach { preset ->
+            listOf(VisualPreset.PREMIUM, VisualPreset.SYNESTHETIC, VisualPreset.LANES, VisualPreset.MINIMAL).forEach { preset ->
                 FilterChip(
                     selected = settings.preset == preset,
                     onClick = { onPresetChanged(preset) },
@@ -1010,6 +1022,9 @@ private fun VisualControls(
             }
             AccessibilitySwitch("Movimiento reducido", settings.reducedMotion, onReducedMotionChanged, "music_reduced_motion")
             AccessibilitySwitch("Destellos", settings.flashesEnabled, onFlashesChanged, "music_flashes")
+            if (showTorchFlash) {
+                AccessibilitySwitch("Torch flash · experimental", settings.torchFlashEnabled, onTorchFlashChanged, "music_torch_flash")
+            }
             AccessibilitySwitch("Letra estable", settings.stableLyrics, onStableLyricsChanged, "music_stable_lyrics")
             AccessibilitySwitch("Aviso intenso", settings.intenseVisualWarningEnabled, onIntenseVisualWarningChanged, "music_visual_warning")
             AccessibilitySwitch("Partículas", settings.particlesEnabled, onParticlesEnabledChanged, "music_particles")

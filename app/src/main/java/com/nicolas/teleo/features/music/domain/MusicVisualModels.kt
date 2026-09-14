@@ -40,6 +40,7 @@ interface MusicFeatureInterpolator {
 }
 
 enum class VisualPreset(val label: String) {
+    PREMIUM("Premium"),
     SYNESTHETIC("Sinestesia"),
     PARTICLES("Partículas"),
     WAVES("Ondas"),
@@ -76,6 +77,7 @@ data class MusicVisualSettings(
     val particleIntensity: Float = 1f,
     val motionIntensity: Float = 1f,
     val flashesEnabled: Boolean = true,
+    val torchFlashEnabled: Boolean = false,
     val limitBrightnessChanges: Boolean = true,
     val lyricsDisplayMode: LyricsDisplayMode = LyricsDisplayMode.ORIGINAL_AND_TRANSLATED,
     val targetTranslationLanguage: String = "es",

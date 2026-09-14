@@ -12,6 +12,7 @@ import com.nicolas.teleo.features.music.domain.HapticSettings
 import com.nicolas.teleo.features.music.domain.MusicAnalysisProgress
 import com.nicolas.teleo.features.music.domain.MusicAnalysisStage
 import com.nicolas.teleo.features.music.domain.MusicExperienceState
+import com.nicolas.teleo.features.music.domain.MusicExperienceSource
 import com.nicolas.teleo.features.music.domain.MusicTimeline
 import com.nicolas.teleo.features.music.domain.MusicTrack
 import com.nicolas.teleo.features.music.domain.MusicVisualSettings
@@ -94,6 +95,26 @@ class MusicExperienceScreenTest {
     }
 
     @Test
+    fun premiumSceneCanBeSelected() {
+        var preset = VisualPreset.SYNESTHETIC
+        composeRule.setContent {
+            MaterialTheme { PlaybackScreenForTest(onVisualPresetChanged = { preset = it }) }
+        }
+        composeRule.onNodeWithTag("music_preset_premium").performClick()
+        assertTrue(preset == VisualPreset.PREMIUM)
+    }
+
+    @Test
+    fun experimentalTorchCanBeEnabled() {
+        var enabled = false
+        composeRule.setContent {
+            MaterialTheme { PlaybackScreenForTest(onTorchFlashChanged = { enabled = it }) }
+        }
+        composeRule.onNodeWithTag("music_torch_flash").performClick()
+        assertTrue(enabled)
+    }
+
+    @Test
     fun reducedMotionCanBeEnabled() {
         var enabled = false
         composeRule.setContent {
@@ -128,6 +149,7 @@ class MusicExperienceScreenTest {
         onHapticsChanged: (Boolean) -> Unit = {},
         onVisualPresetChanged: (VisualPreset) -> Unit = {},
         onReducedMotionChanged: (Boolean) -> Unit = {},
+        onTorchFlashChanged: (Boolean) -> Unit = {},
         onLyricsModeChanged: (LyricsDisplayMode) -> Unit = {}
     ) {
         val track = MusicTrack("id", "Demo", null, "content://demo", 20_000)
@@ -142,7 +164,8 @@ class MusicExperienceScreenTest {
                 hapticSettings = HapticSettings(),
                 visualSettings = MusicVisualSettings(),
                 syncOffsetMs = 0,
-                isRecoveringBuffer = false
+                isRecoveringBuffer = false,
+                source = MusicExperienceSource.REMOTE
             ),
             selectedIntensity = HapticIntensity.MEDIUM,
             onBack = {},
@@ -154,6 +177,7 @@ class MusicExperienceScreenTest {
             onSyncOffsetChanged = {},
             onVisualPresetChanged = onVisualPresetChanged,
             onReducedMotionChanged = onReducedMotionChanged,
+            onTorchFlashChanged = onTorchFlashChanged,
             onLyricsDisplayModeChanged = onLyricsModeChanged
         )
     }

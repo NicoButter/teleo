@@ -32,6 +32,8 @@ import com.nicolas.teleo.features.music.visual.TeleoExperienceSampler
 import com.nicolas.teleo.features.music.visual.MusicParticle
 import com.nicolas.teleo.features.music.visual.ParticleSemanticRole
 import com.nicolas.teleo.features.music.visual.ParticleShape
+import com.nicolas.teleo.features.music.visual.PremiumMusicScene
+import com.nicolas.teleo.features.music.visual.drawPremiumMusicScene
 import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.abs
@@ -56,6 +58,10 @@ fun GenerativeMusicCanvas(
     val secondaryWavePath = remember { Path() }
     val particlePath = remember { Path() }
     val organicPath = remember { Path() }
+    val premiumOuterMouthPath = remember { Path() }
+    val premiumInnerMouthPath = remember { Path() }
+    val premiumAccentPath = remember { Path() }
+    val premiumScene = remember(timeline.trackId, timeline.analysisVersion) { PremiumMusicScene() }
     var renderTick by remember { mutableIntStateOf(0) }
     var positionMs by remember { mutableLongStateOf(playbackPositionProvider()) }
     var features by remember(timeline, teleoExperience) { mutableStateOf(sampler?.sample(positionMs)?.asFeatureFrame() ?: interpolator.interpolate(timeline.featureFrames, positionMs)) }
@@ -84,11 +90,14 @@ fun GenerativeMusicCanvas(
                         it.timestampMs in (currentPosition - 1_200L).coerceAtLeast(0)..currentPosition
                     }
                     engine.rebuild(currentPosition, currentFeatures, recent)
+                    premiumScene.reset(currentPosition)
+                    if (sampled != null) premiumScene.update(sampled, recent, 0f, settings)
                     recent
                 } else {
                     val frameEvents = ((sampled?.crossedEvents ?: timeline.eventsBetween(previousPosition, currentPosition)) +
                         timeline.activeEventsAt(currentPosition)).distinctBy { "${it.timestampMs}:${it.type}" }
                     engine.update(currentPosition, deltaSeconds, currentFeatures, frameEvents)
+                    if (sampled != null) premiumScene.update(sampled, frameEvents, deltaSeconds, settings)
                     frameEvents
                 }
                 visualEvents.forEach { event ->
@@ -111,18 +120,23 @@ fun GenerativeMusicCanvas(
     Canvas(modifier = modifier) {
         @Suppress("UNUSED_VARIABLE")
         val invalidateCanvasOnly = renderTick
-        drawGenerativeBackground(features, settings, positionMs)
-        if (settings.preset == VisualPreset.SYNESTHETIC) {
-            drawSynestheticInstruments(features, settings, positionMs, lastKickMs, lastSnareMs, lastHiHatMs, organicPath)
-        }
-        if (VisualInstrument.BASS in settings.visibleInstruments) {
-            drawReactiveWaves(features, settings, positionMs, wavePath, secondaryWavePath)
-        }
-        if (settings.particlesEnabled && settings.preset != VisualPreset.MINIMAL) {
-            engine.particles().forEach { drawMusicParticle(it, particlePath, settings) }
-        }
-        if (VisualInstrument.RHYTHM in settings.visibleInstruments && settings.preset != VisualPreset.SYNESTHETIC) {
-            drawBeatFocus(features, settings)
+        if (settings.preset == VisualPreset.PREMIUM && sampler != null) {
+            drawPremiumMusicScene(premiumScene.state, settings, premiumOuterMouthPath, premiumInnerMouthPath, premiumAccentPath)
+            if (settings.particlesEnabled) engine.particles().forEach { drawMusicParticle(it, particlePath, settings) }
+        } else {
+            drawGenerativeBackground(features, settings, positionMs)
+            if (settings.preset == VisualPreset.SYNESTHETIC) {
+                drawSynestheticInstruments(features, settings, positionMs, lastKickMs, lastSnareMs, lastHiHatMs, organicPath)
+            }
+            if (VisualInstrument.BASS in settings.visibleInstruments) {
+                drawReactiveWaves(features, settings, positionMs, wavePath, secondaryWavePath)
+            }
+            if (settings.particlesEnabled && settings.preset != VisualPreset.MINIMAL) {
+                engine.particles().forEach { drawMusicParticle(it, particlePath, settings) }
+            }
+            if (VisualInstrument.RHYTHM in settings.visibleInstruments && settings.preset != VisualPreset.SYNESTHETIC) {
+                drawBeatFocus(features, settings)
+            }
         }
     }
 }

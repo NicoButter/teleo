@@ -50,6 +50,11 @@ class AndroidHapticMusicEngine(context: Context) : HapticMusicEngine {
                     intArrayOf(0, minOf(amplitude, 90), 0, minOf(amplitude, 150), 0, amplitude),
                     -1
                 )
+                MusicEventType.CYMBAL -> VibrationEffect.createWaveform(
+                    longArrayOf(0, 18, 30, 42),
+                    intArrayOf(0, minOf(amplitude, 110), 0, amplitude),
+                    -1
+                )
                 else -> return
             }
         } else {
@@ -59,6 +64,7 @@ class AndroidHapticMusicEngine(context: Context) : HapticMusicEngine {
                 MusicEventType.HI_HAT -> longArrayOf(0, 18)
                 MusicEventType.BASS -> longArrayOf(0, 80)
                 MusicEventType.SECTION_START -> longArrayOf(0, 20, 30, 28, 30, 36)
+                MusicEventType.CYMBAL -> longArrayOf(0, 18, 30, 42)
                 else -> return
             }
             VibrationEffect.createWaveform(timings, -1)
@@ -83,6 +89,7 @@ class AndroidHapticMusicEngine(context: Context) : HapticMusicEngine {
         MusicEventType.HI_HAT -> settings.hiHatEnabled
         MusicEventType.BASS -> settings.bassEnabled
         MusicEventType.SECTION_START -> settings.kickEnabled || settings.snareEnabled
+        MusicEventType.CYMBAL -> settings.kickEnabled || settings.snareEnabled
         else -> false
     }
 }
