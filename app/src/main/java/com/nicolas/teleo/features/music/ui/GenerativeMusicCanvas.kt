@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -32,6 +33,8 @@ import com.nicolas.teleo.features.music.visual.TeleoExperienceSampler
 import com.nicolas.teleo.features.music.visual.MusicParticle
 import com.nicolas.teleo.features.music.visual.ParticleSemanticRole
 import com.nicolas.teleo.features.music.visual.ParticleShape
+import com.nicolas.teleo.features.music.visual.ArticulatoryMouthRenderer
+import com.nicolas.teleo.features.music.visual.RhythmicBackgroundRenderer
 import com.nicolas.teleo.features.music.visual.PremiumMusicScene
 import com.nicolas.teleo.features.music.visual.drawPremiumMusicScene
 import kotlinx.coroutines.isActive
@@ -47,7 +50,8 @@ fun GenerativeMusicCanvas(
     isPlaying: Boolean,
     playbackPositionProvider: () -> Long,
     settings: MusicVisualSettings,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pausedPositionMs: Long = 0L
 ) {
     val interpolator = remember { LinearMusicFeatureInterpolator() }
     val sampler = remember(teleoExperience) { teleoExperience?.let(::TeleoExperienceSampler) }
@@ -58,9 +62,10 @@ fun GenerativeMusicCanvas(
     val secondaryWavePath = remember { Path() }
     val particlePath = remember { Path() }
     val organicPath = remember { Path() }
-    val premiumOuterMouthPath = remember { Path() }
-    val premiumInnerMouthPath = remember { Path() }
-    val premiumAccentPath = remember { Path() }
+    val mouthRenderer = remember { ArticulatoryMouthRenderer() }
+    val backgroundRenderer = remember { RhythmicBackgroundRenderer() }
+    val currentSettings by rememberUpdatedState(settings)
+    val currentPositionProvider by rememberUpdatedState(playbackPositionProvider)
     val premiumScene = remember(timeline.trackId, timeline.analysisVersion) { PremiumMusicScene() }
     var renderTick by remember { mutableIntStateOf(0) }
     var positionMs by remember { mutableLongStateOf(playbackPositionProvider()) }
@@ -72,15 +77,32 @@ fun GenerativeMusicCanvas(
     LaunchedEffect(engine, settings) {
         engine.setSettings(settings)
     }
-    LaunchedEffect(engine, timeline, isPlaying, settings.preset) {
+    // No paused loop: a changed position published by the player invalidates one sample.
+    LaunchedEffect(premiumScene, sampler, isPlaying, pausedPositionMs, settings) {
+        if (!isPlaying && sampler != null) {
+            premiumScene.update(sampler.sample(currentPositionProvider()), emptyList(), 0f, settings)
+            renderTick++
+        }
+    }
+    LaunchedEffect(engine, timeline, sampler, isPlaying, settings.preset) {
         if (!isPlaying) return@LaunchedEffect
         var previousFrameNanos = 0L
-        var previousPosition = playbackPositionProvider()
+        var previousPosition = currentPositionProvider()
         while (isActive) {
             withFrameNanos { frameNanos ->
-                val currentPosition = playbackPositionProvider().coerceIn(0, timeline.durationMs)
+                val currentPosition = currentPositionProvider().coerceIn(0, timeline.durationMs)
+                val settings = currentSettings
                 val deltaSeconds = if (previousFrameNanos == 0L) 0f else {
                     ((frameNanos - previousFrameNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
+                }
+                if (settings.preset == VisualPreset.PREMIUM && sampler != null) {
+                    val sample = sampler.sample(currentPosition)
+                    premiumScene.update(sample, emptyList(), deltaSeconds, settings)
+                    previousFrameNanos = frameNanos
+                    previousPosition = currentPosition
+                    positionMs = currentPosition
+                    renderTick++
+                    return@withFrameNanos
                 }
                 val sampled = sampler?.sample(currentPosition, previousPosition)
                 val currentFeatures = sampled?.asFeatureFrame() ?: interpolator.interpolate(timeline.featureFrames, currentPosition)
@@ -121,8 +143,7 @@ fun GenerativeMusicCanvas(
         @Suppress("UNUSED_VARIABLE")
         val invalidateCanvasOnly = renderTick
         if (settings.preset == VisualPreset.PREMIUM && sampler != null) {
-            drawPremiumMusicScene(premiumScene.state, settings, premiumOuterMouthPath, premiumInnerMouthPath, premiumAccentPath)
-            if (settings.particlesEnabled) engine.particles().forEach { drawMusicParticle(it, particlePath, settings) }
+            drawPremiumMusicScene(premiumScene.state, settings, mouthRenderer, backgroundRenderer)
         } else {
             drawGenerativeBackground(features, settings, positionMs)
             if (settings.preset == VisualPreset.SYNESTHETIC) {

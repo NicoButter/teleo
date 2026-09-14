@@ -26,7 +26,9 @@ data class TeleoVisualState(
     val bass: TeleoBassVisualSignal? = null,
     val ambient: TeleoAmbientVisualSignal = TeleoAmbientVisualSignal(),
     val activeDrumImpulses: List<TeleoVisualImpulse> = emptyList(),
-    val crossedEvents: List<MusicEvent> = emptyList()
+    val crossedEvents: List<MusicEvent> = emptyList(),
+    val articulatedPose: MouthPose? = null,
+    val drumAccents: RhythmicBackgroundState? = null
 ) {
     fun asFeatureFrame(): MusicFeatureFrame = MusicFeatureFrame(
         timestampMs = positionMs,
@@ -45,6 +47,14 @@ data class TeleoVisualState(
 
 /** Timestamp-based sampler; it never owns or advances musical time. */
 class TeleoExperienceSampler(private val experience: TeleoExperience) {
+    private val mouth = MouthArticulationTimeline(if (experience.isReliable("vocals")) experience.visemes else emptyList())
+    private val rhythm = RhythmicBackgroundSampler(if (experience.isReliable("drums")) experience.drums else emptyList())
+    // Prefix maximum end supports overlapping impulses without a full-song scan.
+    private val drumEndPrefix = ArrayList<Long>(experience.drums.size).apply {
+        var end = 0L
+        experience.drums.forEach { end = maxOf(end, it.startMs + it.durationMs); add(end) }
+    }
+
     fun sample(positionMs: Long, previousPositionMs: Long? = null): TeleoVisualState {
         val position = positionMs.coerceAtLeast(0)
         val vocals = if (experience.isReliable("vocals")) interpolateVocal(experience.vocalFrames, position) else TeleoVocalVisualSignal()
@@ -52,12 +62,10 @@ class TeleoExperienceSampler(private val experience: TeleoExperience) {
         val bass = if (experience.isReliable("bass")) activeAt(experience.bassNotes, position, TeleoBassNote::startMs) { it.endMs }
             ?.let { TeleoBassVisualSignal(it.midi, it.pitch, it.intensity.clamp(), it.confidence.clamp()) } else null
         val articulation = if (experience.isReliable("vocals")) activeAt(experience.visemes, position, { it.startMs }) { it.endMs }?.shape else null
-        val drums = if (experience.isReliable("drums")) experience.drums.filter { position in it.startMs..(it.startMs + it.durationMs) }
+        val drums = if (experience.isReliable("drums")) experience.drums.subList(upperBound(drumEndPrefix, position - 1) { it }, upperBound(experience.drums, position) { it.startMs }).filter { position in it.startMs..(it.startMs + it.durationMs) }
             .map { TeleoVisualImpulse(it.type, it.intensity.clamp(), it.durationMs) } else emptyList()
-        val crossed = if (previousPositionMs != null && position >= previousPositionMs) experience.timelineEvents.filter {
-            it.timestampMs > previousPositionMs && it.timestampMs <= position
-        } else emptyList()
-        return TeleoVisualState(position, vocals, articulation, bass, ambient, drums, crossed)
+        val crossed = if (previousPositionMs != null && position >= previousPositionMs) experience.timelineEvents.subList(upperBound(experience.timelineEvents, previousPositionMs) { it.timestampMs }, upperBound(experience.timelineEvents, position) { it.timestampMs }) else emptyList()
+        return TeleoVisualState(position, vocals, articulation, bass, ambient, drums, crossed, mouth.poseAt(position), rhythm.sample(position))
     }
 
     private fun interpolateVocal(frames: List<TeleoVocalFrame>, position: Long): TeleoVocalVisualSignal {

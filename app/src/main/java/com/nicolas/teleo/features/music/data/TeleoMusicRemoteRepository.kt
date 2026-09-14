@@ -395,7 +395,7 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
         require(dto.track.durationMs == catalogTrack.durationMs) { "Catalog and experience durations differ" }
         dto.experienceVersion?.let { require(it == catalogTrack.experienceVersion) { "Experience version differs from catalog" } }
         val events = buildList {
-            addAll(dto.drums.events.map { it.toEvent(drumType(it.type)) })
+            addAll(dto.drums.events.map { it.toEvent() })
             addAll(dto.bass.events.map { it.toEvent(MusicEventType.BASS) })
             addAll(dto.bass.notes.map { it.toEvent(MusicEventType.BASS) })
             addAll(dto.guitar.events.map { it.toEvent(MusicEventType.GUITAR) })
@@ -481,15 +481,15 @@ class TeleoMusicDtoMapper(private val json: Json = Json { ignoreUnknownKeys = tr
     }
 
     private fun TimedEventDto.toEvent(fallback: MusicEventType) = MusicEvent(startMs, endMs?.minus(startMs)?.coerceAtLeast(0) ?: durationMs, type?.let(::eventType) ?: fallback, intensity.coerceIn(0f, 1f), label)
-    private fun DrumEventDto.toEvent(fallback: MusicEventType) = MusicEvent(timeMs, durationMs, type?.let(::eventType) ?: fallback, intensity.coerceIn(0f, 1f), id)
+    private fun DrumEventDto.toEvent() = MusicEvent(timeMs, durationMs, drumType(type), intensity.coerceIn(0f, 1f), id)
     private fun InstrumentNoteDto.toEvent(type: MusicEventType) = MusicEvent(resolvedStartMs(), resolvedDurationMs(), type, intensity.coerceIn(0f, 1f), id)
     private fun String.toTeleoChannelQuality(): TeleoChannelQuality = when (lowercase()) { "reliable" -> TeleoChannelQuality.RELIABLE; "unreliable" -> TeleoChannelQuality.UNRELIABLE; else -> TeleoChannelQuality.UNKNOWN }
-    private fun drumType(type: String?): MusicEventType = when (type?.lowercase()?.replace('-', '_')) {
+    private fun drumType(type: String?): MusicEventType = when (type?.trim()?.lowercase()?.replace('-', '_')) {
         "kick", "bass_drum" -> MusicEventType.KICK
-        "snare" -> MusicEventType.SNARE
-        "hi_hat", "hihat", "hat" -> MusicEventType.HI_HAT
-        "tom", "toms" -> MusicEventType.TOM
-        "cymbal", "crash", "ride" -> MusicEventType.CYMBAL
+        "snare", "snare_drum", "rimshot", "side_stick" -> MusicEventType.SNARE
+        "hi_hat", "hihat", "hat", "open_hi_hat", "closed_hi_hat", "hi_hat_open", "hi_hat_closed", "pedal_hi_hat" -> MusicEventType.HI_HAT
+        "tom", "toms", "low_tom", "mid_tom", "high_tom", "floor_tom" -> MusicEventType.TOM
+        "cymbal", "cymbals", "crash", "ride", "splash", "crash_cymbal", "ride_cymbal", "china" -> MusicEventType.CYMBAL
         else -> MusicEventType.OTHER
     }
     private fun vocalType(type: String?): MusicEventType = if (type.equals("end", true) || type.equals("vocal_end", true)) MusicEventType.VOCAL_END else MusicEventType.VOCAL_START

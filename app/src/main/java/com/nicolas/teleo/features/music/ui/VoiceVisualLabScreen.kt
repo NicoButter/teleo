@@ -61,6 +61,8 @@ private val VoiceLabGold = Color(0xFFFFD86B)
 
 @Composable
 fun VoiceVisualLabScreen(onBack: () -> Unit) {
+    var mouthLabOpen by remember { mutableStateOf(false) }
+    if (mouthLabOpen) MouthArticulationLab(onDismiss = { mouthLabOpen = false })
     var presence by remember { mutableFloatStateOf(0.72f) }
     var intensity by remember { mutableFloatStateOf(0.58f) }
     var pitch by remember { mutableFloatStateOf(0.5f) }
@@ -163,7 +165,9 @@ fun VoiceVisualLabScreen(onBack: () -> Unit) {
                 Text("VOICE VISUAL LAB", color = VoiceLabCyan, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                 Text("Simulador visual · sin micrófono", color = Color.White.copy(alpha = 0.58f), fontSize = 11.sp)
             }
-            Icon(Icons.Default.AutoAwesome, null, tint = VoiceLabGold)
+            androidx.compose.material3.TextButton(onClick = { mouthLabOpen = true }, modifier = Modifier.testTag("open_mouth_lab")) {
+                Text("Boca", color = VoiceLabGold)
+            }
         }
 
         Surface(

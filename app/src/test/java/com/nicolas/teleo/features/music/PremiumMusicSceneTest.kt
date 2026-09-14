@@ -19,22 +19,22 @@ class PremiumMusicSceneTest {
     @Test fun `every Rhubarb group maps to a deliberate articulatory pose`() {
         val poses = VocalVisemeShape.entries.associateWith(RhubarbMouthPoseMapper::poseFor)
         assertEquals(MouthPose.REST, poses[VocalVisemeShape.X])
-        assertTrue(poses.getValue(VocalVisemeShape.D).openness > poses.getValue(VocalVisemeShape.A).openness)
-        assertTrue(poses.getValue(VocalVisemeShape.F).roundness > poses.getValue(VocalVisemeShape.C).roundness)
-        assertTrue(poses.getValue(VocalVisemeShape.G).teethVisibility > poses.getValue(VocalVisemeShape.F).teethVisibility)
-        assertTrue(poses.getValue(VocalVisemeShape.H).tongueVisibility > 0f)
+        assertTrue(poses.getValue(VocalVisemeShape.D).lipOpen > poses.getValue(VocalVisemeShape.A).lipOpen)
+        assertTrue(poses.getValue(VocalVisemeShape.F).lipRound > poses.getValue(VocalVisemeShape.C).lipRound)
+        assertTrue(poses.getValue(VocalVisemeShape.G).upperTeethVisible > poses.getValue(VocalVisemeShape.F).upperTeethVisible)
+        assertTrue(poses.getValue(VocalVisemeShape.H).tongueVisible > 0f)
         assertEquals(VocalVisemeShape.entries.size, poses.values.distinct().size)
     }
 
-    @Test fun `mouth pose and vocal features ease without replacing musical time`() {
+    @Test fun `articulation dominates intensity while vocal features ease without replacing musical time`() {
         val scene = PremiumMusicScene()
         scene.update(sample(1_000, VocalVisemeShape.X, .1f), emptyList(), 0f, MusicVisualSettings())
         val first = scene.update(sample(1_016, VocalVisemeShape.D, 1f), emptyList(), .016f, MusicVisualSettings())
-        val target = RhubarbMouthPoseMapper.poseFor(VocalVisemeShape.D).openness + .12f
+        val target = RhubarbMouthPoseMapper.poseFor(VocalVisemeShape.D).lipOpen
 
         assertEquals(1_016L, first.positionMs)
-        assertTrue(first.voice.pose.openness > MouthPose.REST.openness)
-        assertTrue(first.voice.pose.openness < target)
+        assertTrue(first.voice.pose.lipOpen > MouthPose.REST.lipOpen)
+        assertEquals(target, first.voice.pose.lipOpen, 0f)
         assertTrue(first.voice.presence in .1f..1f)
         assertEquals(.8f, first.ambientEnergy, .001f)
     }

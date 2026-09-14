@@ -155,23 +155,38 @@ REMOTE selecciona **Premium** como escena inicial y conserva Sinestesia, Carrile
 Minimal como opciones. `PremiumMusicScene` compone estado estable sin poseer el
 reloj; `PremiumMusicRenderer` lo dibuja con Canvas/Compose.
 
-Cada grupo Rhubarb `A B C D E F G H X` tiene un `MouthPose` con apertura, ancho,
-redondez, caída de mandíbula, elevación del labio, dientes y lengua. La pose activa
-se combina con `presence`, `intensity`, `pitchNormalized`, `pitchConfidence` y
-`spectralBrightness`. Un filtro exponencial suaviza pose y señales; el pitch solo
-desplaza la boca cuando su confianza es suficiente. La boca conserva contorno,
-cavidad interior y claves de dientes/lengua para ser reconocible por forma.
+La boca y la percusión tienen renderers independientes. El detalle del incremento
+articulatorio, sus límites y su validación está en
+[Renderer articulatorio y fondo rítmico](MUSIC_ARTICULATION_RENDERER.md).
 
-La batería tampoco depende solo del color: kick usa anillos profundos inferiores;
-snare, fragmentos laterales; hi-hat, una chispa periférica; cymbal, un arco amplio;
-y tom, óvalos intermedios alternados. `other.frames` controla gradientes y contornos
-ambientales. Movimiento reducido disminuye expansión y cantidad de elementos; al
-desactivar destellos, hi-hat y cymbal permanecen geométricamente visibles con brillo
-atenuado. No hay flashes de pantalla completa.
+- `TeleoExperienceSampler` busca visemas y batería por timestamp; prepara la pose
+  coarticulada y los últimos golpes confiables de cinco familias.
+- `MouthArticulationTimeline` usa previous/current/next y ventanas de hasta 35 ms
+  por lado. No desplaza timestamps ni mantiene un reloj o filtro que retrase el
+  cierre; el centro de cada visema conserva su pose completa.
+- `RhubarbMouthPoseMapper` cachea nueve poses de 15 parámetros normalizados.
+- `ArticulatoryMouthRenderer` dibuja labios independientes, cavidad, incisivos
+  superiores/inferiores, lengua y soporte de mandíbula. Los bordes comparten
+  comisuras y una única sutura cuando están cerrados. A añade presión; X es relajado.
+- `RhythmicBackgroundSampler` indexa las familias una vez; cada frame usa cinco
+  búsquedas binarias. `RhythmicPressureField` reutiliza una malla 33 × 23;
+  `RhythmicBackgroundRenderer` dibuja presión radial de kick, tensión de snare,
+  resonancia lateral de tom y luz localizada de cymbal/hi-hat.
+- La intensidad vocal solo modifica ligeramente el brillo labial; el pitch se
+  ignora para mantener estable el foco de lectura. La articulación no depende de
+  la presencia/intensidad ni se abre artificialmente con ellas.
+- Premium no superpone las partículas genéricas a la boca. Movimiento reducido
+  atenúa el fondo, pero conserva las claves articulatorias; los controles de
+  destellos y brillo limitan la luz periférica, sin flashes de pantalla completa.
 
-La implementación usa Canvas en API 26+ y no activa AGSL/`RuntimeShader` todavía.
-AGSL queda reservado como mejora progresiva para Android 13+; no es necesario para
-la escena ni altera el fallback.
+Con audio se consulta únicamente `ExoPlayer.currentPosition`. Al pausar se hace
+un muestreo final; un seek en pausa invalida otro frame sin dejar un loop activo.
+La importación sin audio conserva su fuente temporal de desarrollo preexistente.
+El modo fijo **Voice Visual Lab → Boca** no tiene reloj ni analiza audio.
+
+No se agregaron dependencias. Se conserva Canvas en API 26+ y Graphics Shapes para
+el laboratorio orgánico. AGSL, Rive y motores externos no son necesarios para este
+incremento.
 
 ### Háptica y torch
 
@@ -405,8 +420,8 @@ Las pruebas instrumentadas Compose requieren un emulador o dispositivo:
 
 ## Limitaciones actuales
 
-- Ritmo, energías, instrumentos, secciones, letra, traducción y avance del análisis son simulados.
-- El BPM por defecto es 112 y no se extrae del audio.
+- En MOCK, ritmo, energías, instrumentos, secciones, letra, traducción y avance del análisis son simulados. REMOTE/LOCAL_IMPORT consumen exclusivamente el JSON externo validado.
+- En MOCK, el BPM por defecto es 112. Teleo no extrae BPM del audio local.
 - La letra es texto bilingüe genérico creado para la demostración; no se importan letras protegidas.
 - El parser LRC, texto manual y caché por idioma están implementados como infraestructura, pero aún no tienen flujo de importación visible.
 - `WAVES` e `IMMERSIVE` están modelados pero todavía comparten/esperan una escena dedicada.

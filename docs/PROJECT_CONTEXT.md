@@ -6,19 +6,23 @@
 
 ## Fotografía verificada
 
-- **Fecha de revisión:** 13 de septiembre de 2026.
+- **Fecha de revisión:** 14 de septiembre de 2026.
 - **Rama revisada:** `main`.
-- **Commit base:** `e45ae40d142f26b20c19eea8a25cb963772add96` —
-  `feat: Implement Voice Visual Lab with interactive controls and visualizations`.
+- **Commit base:** `6c35800` —
+  `feat: Enhance Teleo Music with Premium Scene, Torch Flash, and Remote Haptics`,
+  más el incremento articulatorio local sin commit.
 - **Aplicación:** Android nativa, un único módulo Gradle (`:app`).
 - **Identificador:** `com.nicolas.teleo`.
 - **Versión declarada:** `1.0` (`versionCode = 1`).
 - **Estado de compilación al revisar:**
-  `testDebugUnitTest` y `compileDebugAndroidTestKotlin` completaron con
-  `BUILD SUCCESSFUL`.
+  `testDebugUnitTest` (64 pruebas, cero fallos),
+  `compileDebugAndroidTestKotlin` y `assembleDebug` completados.
+  `connectedDebugAndroidTest` no pudo ejecutar: `No connected devices`.
+  El emulador local terminó con código 139 en tres configuraciones de arranque;
+  la revisión visual de las nuevas poses sigue pendiente.
 
-Este documento describe el código del commit indicado más los cambios puramente
-documentales que lo incorporan. Si una afirmación contradice al código, al
+Este documento describe el código del commit indicado más los cambios locales
+del renderer articulatorio y del fondo de percusión. Si una afirmación contradice al código, al
 manifest, a Gradle o a una prueba, esas fuentes técnicas tienen prioridad y este
 archivo debe corregirse.
 
@@ -154,9 +158,16 @@ seleccionada desde la galería.
 - Ofrece escenas Sinestesia, Carriles y Minimal; controles de calidad, instrumentos,
   partículas, destellos, movimiento reducido, letra y ajuste de sincronía. REMOTE
   selecciona inicialmente la escena Premium, sin eliminar las escenas anteriores.
-- La escena Premium transforma visemas Rhubarb en `MouthPose`, combina presencia,
-  intensidad, pitch/confianza y brillo vocal con easing, diferencia batería por
-  geometría/posición y usa `other.frames` como ambiente.
+- La escena Premium transforma los nueve visemas Rhubarb en poses articulatorias
+  de 15 parámetros con coarticulación por timestamp. Dibuja labios, comisuras,
+  cavidad, dientes, lengua y mandíbula; diferencia cierre con presión de reposo.
+- `RhythmicBackgroundRenderer` dibuja una malla de presión para kick/snare/tom y
+  luz periférica para cymbal/hi-hat, usando índices temporales del JSON confiable.
+  Pausa y seek vuelven a muestrear desde la posición del reproductor; la intensidad
+  no abre labios cerrados y el pitch no desplaza el foco de lectura.
+- Voice Visual Lab incluye **Boca**, un inspector de poses fijas que reutiliza el
+  renderer de reproducción. No agrega dependencias ni persistencia.
+- Detalles y limitaciones: [Renderer articulatorio](MUSIC_ARTICULATION_RENDERER.md).
 - Si Kinetra no publica `haptics`, compone pulsos solo desde eventos confiables del
   mismo protocolo (nunca Mock). Los cancela al pausar, buscar o salir.
 - Ofrece `Torch flash` experimental, apagado por defecto, limitado a acentos
@@ -340,8 +351,9 @@ la desinstalación elimina sus datos locales. Debe usarse de forma consciente.
   repositorio actual.
 - La escena Premium usa Canvas/Compose en todas las APIs soportadas. No incorpora
   todavía AGSL/`RuntimeShader`; queda como mejora progresiva posible para Android 13+.
-- No se verificaron pruebas instrumentadas en esta revisión porque requieren un
-  dispositivo o emulador conectado.
+- No se ejecutaron las pruebas instrumentadas: el emulador temporal falló al
+  arrancar y Gradle informó `No connected devices`. La diferenciación visual de
+  MBP/UW/FV/L y el rendimiento físico aún requieren revisión en Android.
 
 ## Criterios para futuras modificaciones
 
@@ -363,8 +375,7 @@ la desinstalación elimina sus datos locales. Debe usarse de forma consciente.
 
 ## Próximo punto técnico ya identificado
 
-La documentación de Música propone como incremento mínimo reemplazar parte del mock
-con análisis local de una ventana PCM mono: decodificar con
-`MediaExtractor`/`MediaCodec`, calcular energía RMS por bloques y detectar picos con
-umbral adaptativo. Es una propuesta documentada, no una función implementada ni una
-prioridad global confirmada.
+Validar las poses y la coarticulación con personas que utilizan lectura labial y
+con un JSON real de Kinetra sincronizado con su audio local. Medir FPS/jank en
+hardware físico de gama media. Teleo permanece como player + renderer; el análisis
+externo no se traslada al teléfono.

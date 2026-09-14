@@ -855,6 +855,7 @@ private fun MusicVisualStage(
             GenerativeMusicCanvas(
                 timeline = timeline,
                 teleoExperience = teleoExperience,
+                pausedPositionMs = positionMs,
                 isPlaying = isPlaying,
                 playbackPositionProvider = playbackPositionProvider,
                 settings = settings,

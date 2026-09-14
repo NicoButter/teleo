@@ -6,36 +6,6 @@ import com.nicolas.teleo.features.music.domain.MusicVisualSettings
 import com.nicolas.teleo.features.music.domain.VocalVisemeShape
 import kotlin.math.exp
 
-/** A renderer-ready, recognizable articulatory pose. Values are normalized. */
-data class MouthPose(
-    val width: Float,
-    val openness: Float,
-    val roundness: Float,
-    val upperLipLift: Float,
-    val jawDrop: Float,
-    val teethVisibility: Float,
-    val tongueVisibility: Float
-) {
-    companion object {
-        val REST = MouthPose(.72f, .05f, .25f, 0f, 0f, 0f, 0f)
-    }
-}
-
-/** Rhubarb codes are visual mouth groups, not phoneme labels. */
-object RhubarbMouthPoseMapper {
-    fun poseFor(shape: VocalVisemeShape?): MouthPose = when (shape ?: VocalVisemeShape.X) {
-        VocalVisemeShape.A -> MouthPose(.82f, .08f, .18f, .05f, .02f, .18f, 0f)
-        VocalVisemeShape.B -> MouthPose(.88f, .22f, .12f, .16f, .12f, .42f, 0f)
-        VocalVisemeShape.C -> MouthPose(.82f, .48f, .18f, .22f, .38f, .20f, .08f)
-        VocalVisemeShape.D -> MouthPose(.72f, .82f, .30f, .25f, .72f, .10f, .12f)
-        VocalVisemeShape.E -> MouthPose(.62f, .62f, .58f, .12f, .50f, .06f, .08f)
-        VocalVisemeShape.F -> MouthPose(.48f, .48f, .92f, .02f, .32f, 0f, 0f)
-        VocalVisemeShape.G -> MouthPose(.78f, .13f, .20f, .04f, .06f, .58f, 0f)
-        VocalVisemeShape.H -> MouthPose(.76f, .30f, .18f, .20f, .18f, .26f, .72f)
-        VocalVisemeShape.X -> MouthPose.REST
-    }
-}
-
 data class PremiumVoiceState(
     val pose: MouthPose = MouthPose.REST,
     val viseme: VocalVisemeShape = VocalVisemeShape.X,
@@ -81,8 +51,7 @@ class PremiumMusicScene {
     ): PremiumMusicState {
         val delta = deltaTimeSeconds.coerceIn(0f, .05f)
         val targetViseme = sample.articulation ?: VocalVisemeShape.X
-        val targetPose = RhubarbMouthPoseMapper.poseFor(targetViseme)
-        val poseSpeed = if (settings.reducedMotion) 8f else 12f
+        val targetPose = sample.articulatedPose ?: RhubarbMouthPoseMapper.poseFor(targetViseme)
         val signalSpeed = if (settings.reducedMotion) 7f else 10f
         val previous = state
         var kick = previous.kick
@@ -102,14 +71,10 @@ class PremiumMusicScene {
             }
         }
         val pitchTarget = sample.vocals.pitchNormalized ?: .5f
-        val dynamicPose = targetPose.copy(
-            openness = (targetPose.openness + sample.vocals.intensity * .12f).coerceIn(0f, 1f),
-            jawDrop = (targetPose.jawDrop + sample.vocals.intensity * .08f).coerceIn(0f, 1f)
-        )
         state = PremiumMusicState(
             positionMs = sample.positionMs,
             voice = PremiumVoiceState(
-                pose = smoothPose(previous.voice.pose, dynamicPose, poseSpeed, delta),
+                pose = targetPose,
                 viseme = targetViseme,
                 presence = damp(previous.voice.presence, sample.vocals.presence, signalSpeed, delta),
                 intensity = damp(previous.voice.intensity, sample.vocals.intensity, signalSpeed, delta),
@@ -121,11 +86,11 @@ class PremiumMusicScene {
             ambientLow = damp(previous.ambientLow, sample.ambient.lowEnergy, 4f, delta),
             ambientMid = damp(previous.ambientMid, sample.ambient.midEnergy, 4f, delta),
             ambientHigh = damp(previous.ambientHigh, sample.ambient.highEnergy, 4f, delta),
-            kick = kick,
-            snare = snare,
-            hiHat = hiHat,
-            cymbal = cymbal,
-            tom = tom
+            kick = sample.drumAccents?.kick ?: kick,
+            snare = sample.drumAccents?.snare ?: snare,
+            hiHat = sample.drumAccents?.hiHat ?: hiHat,
+            cymbal = sample.drumAccents?.cymbal ?: cymbal,
+            tom = sample.drumAccents?.tom ?: tom
         )
         return state
     }
@@ -133,16 +98,6 @@ class PremiumMusicScene {
     fun reset(positionMs: Long = 0) {
         state = PremiumMusicState(positionMs = positionMs.coerceAtLeast(0))
     }
-
-    private fun smoothPose(current: MouthPose, target: MouthPose, speed: Float, delta: Float) = MouthPose(
-        damp(current.width, target.width, speed, delta),
-        damp(current.openness, target.openness, speed, delta),
-        damp(current.roundness, target.roundness, speed, delta),
-        damp(current.upperLipLift, target.upperLipLift, speed, delta),
-        damp(current.jawDrop, target.jawDrop, speed, delta),
-        damp(current.teethVisibility, target.teethVisibility, speed, delta),
-        damp(current.tongueVisibility, target.tongueVisibility, speed, delta)
-    )
 
     private fun damp(current: Float, target: Float, speed: Float, delta: Float): Float {
         if (delta <= 0f) return target
